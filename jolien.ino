@@ -1,84 +1,40 @@
 
-#include "FS.h"
-#include "SPI.h"
-#include <SdFat.h>
-#include "Wire.h"
-#include "esp_wifi.h"
-#include "esp_bt.h"
-
-#include <driver/i2s.h>
-#include <math.h>
 #include <Arduino.h>
 #include <TimeLib.h>
-#define SD_FAT_TYPE 2
+#include "esp_wifi.h"
+#include "esp_bt.h"
+#include "CardReader.h"
+#include "SoundHandler.h"
 
-// SDCARD_SS_PIN is defined for the built-in SD on some boards.
-#ifndef SDCARD_SS_PIN
-const uint8_t SD_CS_PIN = GPIO_NUM_5;
-#else  // SDCARD_SS_PIN
-// Assume built-in SD is used.
-const uint8_t SD_CS_PIN = SDCARD_SS_PIN;
-SDCARD_SS_PIN
-#endif //
+// // easy format 2 min
+// #define RECORD_TIME_MS (120000) // ( 2 * 60 * 1000 )
+// // easy format 8 min
+// #define SLEEP_TIME_MS (480000) //( 8 * 60 * 1000 )
 
-// Try max SPI clock for an SD. Reduce SPI_CLOCK if errors occur.
-#define SPI_CLOCK SD_SCK_MHZ(15)
+// // easy format 2 min
+#define RECORD_TIME_MS (120000) // ( 1 * 60 * 1000 )
+// easy format 10 sec
+#define SLEEP_TIME_MS (10000) //( 1 * 10 * 1000 )
 
-// Try to select the best SD card configuration.
-#if HAS_SDIO_CLASS
-#define SD_CONFIG SdioConfig(FIFO_SDIO)
-#elif ENABLE_DEDICATED_SPI
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SPI_CLOCK)
-#else // HAS_SDIO_CLASS
-#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SPI_CLOCK)
-#endif // HAS_SDIO_CLASS
+// adresses for the eeprom
+#define TIME_ADDRESS 0
 
-#if SD_FAT_TYPE == 0
-SdFat sd;
-typedef File file_t;
-#elif SD_FAT_TYPE == 1
-SdFat32 sd;
-typedef File32 file_t;
-#elif SD_FAT_TYPE == 2
-SdExFat sd;
-typedef ExFile file_t;
-#elif SD_FAT_TYPE == 3
-SdFs sd;
-typedef FsFile file_t;
-#else // SD_FAT_TYPE
-#error Invalid SD_FAT_TYPE
-#endif // SD_FAT_TYPE
+#define TIME_HEADER "T" // Header tag for serial time sync message
+#define TIME_REQUEST 7  // ASCII bell character requests a time sync message
 
-#define I2S_WS GPIO_NUM_22
-#define I2S_SD GPIO_NUM_21
-#define I2S_SCK GPIO_NUM_26
-#define I2S_PORT_NUM I2S_NUM_0
-#define I2S_SAMPLE_RATE (44100)
-#define I2S_READ_LEN (1024)
-#define I2S_NUM_CHANNELS (1)
+// Setup handlers
+CardHandler cardHandler = CardHandler();
+SoundHandler soundHandler = SoundHandler();
 
-// easy format 2 min
-#define RECORD_TIME_MS (120000) // ( 2 * 60 * 1000 )
-// easy format 8 min
-#define SLEEP_TIME_MS (480000) //( 8 * 60 * 1000 )
+//  save configuration to a config.txt file
+char configFileName[12] = "/config.txt";
 
-// Set up the WAV header
-struct wav_header_t
-{
-  char riff[4];         /* "RIFF"                                  */
-  long flength;         /* file length in bytes                    */
-  char wave[4];         /* "WAVE"                                  */
-  char fmt[4];          /* "fmt "                                  */
-  long chunk_size;      /* size of FMT chunk in bytes (usually 16) */
-  short format_tag;     /* 1=PCM, 257=Mu-Law, 258=A-Law, 259=ADPCM */
-  short num_chans;      /* 1=mono, 2=stereo                        */
-  long srate;           /* Sampling rate in samples per second     */
-  long bytes_per_sec;   /* bytes per second = srate*bytes_per_samp */
-  short bytes_per_samp; /* 2=16-bit mono, 4=16-bit stereo          */
-  short bits_per_samp;  /* Number of bits per sample               */
-  char data[4];         /* "data"                                  */
-  long dlength;         /* data length in bytes (filelength - 44)  */
-} wavh;
+
+// depending on the state activate the bleutooth for the app or run in recording mode
+#define STATE_SETUP 0
+#define STATE_RECORDING 1
+
+int state = STATE_SETUP;
 
 void setup()
 {
@@ -88,42 +44,93 @@ void setup()
   {
     ; // wait for serial port to connect. Needed for native USB port only
   }
+  // setSyncProvider( requestSync);  //set function to call when sync required
 
+  // disable wifi and bluetooth
   esp_wifi_set_mode(WIFI_MODE_NULL);
   esp_bt_controller_disable();
 
-  // wait some time for the serial monitor to open
-  delay(5000);
-  Serial.println("Setup");
-
-  if (!sd.begin(SD_CONFIG))
+  try
   {
-    sd.initErrorHalt(&Serial);
-    Serial.println("SD card initialization failed!");
-    return;
-  }
+    // initialize card reader
+    cardHandler.init();
 
-  uint32_t size = sd.card()->sectorCount();
-  if (size == 0)
+    // wait some time for the serial monitor to open
+    delay(1000);
+
+    // read the config file
+    file_t configFile = cardHandler.getFile(configFileName);
+
+    // read the config file
+    while (configFile.available())
+    {
+      String line = configFile.readStringUntil('\n');
+      if (line.startsWith("ssid:"))
+      {
+        config.ssid = line.substring(5);
+      }
+      else if (line.startsWith("time:"))
+      {
+        config.time = line.substring(5);
+      }
+    }
+
+    if (time == 0)
+    {
+      // set time to 12:00:00 1.1.2020 if not set
+      setTime(12, 0, 0, 1, 1, 2020);
+    }
+    else
+    {
+      // set the time
+      setTime(time);
+    }
+
+    Serial.print("Time to: ");
+    printClock(time);
+
+    // initialize sound handler
+    soundHandler.init();
+
+    // wait some time for the serial monitor to open
+    delay(5000);
+  }
+  catch (const std::exception &e)
   {
-    Serial.println("Can't determine the card size.\n");
-    return;
+    Serial.println(e.what());
+    while (true)
+    {
+      delay(1000);
+    }
   }
-
-  Serial.print("Card size: ");
-  Serial.print(size / 1024);
-  Serial.println(" MB");
-
-  delay(1000);
-  i2s_install();
-  i2s_setpin();
-  i2s_start(I2S_PORT_NUM);
-
-  delay(5000);
-  Serial.println("Setup done");
 }
 
 void loop()
+{
+
+  switch (state)
+  {
+
+  case STATE_RECORDING:
+    // recordingLoop();
+    goToSleep();
+    break;
+  case STATE_SETUP:
+  default:
+    // setup the time
+    int currentTime = now();
+
+    // set state to recording
+    state = STATE_RECORDING;
+
+    // Print some info
+    Serial.print("Current time: ");
+    Serial.println(currentTime);
+    break;
+  }
+}
+
+void recordingLoop()
 {
   uint32_t recordingStartTime = millis();
   uint32_t recordingEndTime = recordingStartTime + RECORD_TIME_MS;
@@ -134,32 +141,18 @@ void loop()
 
   Serial.print("Recording to file: ");
   Serial.println(filename);
-  file_t file;
 
-  if (!file.open(filename, O_APPEND | O_WRITE | O_CREAT))
+  file_t file = cardHandler.getFile(filename);
+
+  // if file size is 0, add header
+  if (file.size() == 0)
   {
-    sd.errorHalt(&Serial, F("open failed"));
-    return;
+    // Get the WAV header
+    wav_header_t wavh = soundHandler.getWavHeader();
+
+    // Write the WAV header to the file
+    file.write((uint8_t *)&wavh, sizeof(wavh));
   }
-
-  wav_header_t wavh = {
-      {'R', 'I', 'F', 'F'},
-      0, // Placeholder for file length
-      {'W', 'A', 'V', 'E'},
-      {'f', 'm', 't', ' '},
-      16, // FMT chunk size
-      1,  // PCM format
-      I2S_NUM_CHANNELS,
-      I2S_SAMPLE_RATE,
-      I2S_SAMPLE_RATE * I2S_READ_LEN * I2S_NUM_CHANNELS,
-      I2S_NUM_CHANNELS * (I2S_READ_LEN / 2), // bytes per sample = 2 for 16-bit audio
-      16,                                    // 16-bit audio
-      {'d', 'a', 't', 'a'},
-      0 // Placeholder for data length
-  };
-
-  // Write the WAV header to the file
-  file.write((uint8_t *)&wavh, sizeof(wavh));
 
   // Record audio samples to the file
   while (millis() < recordingEndTime)
@@ -167,9 +160,7 @@ void loop()
     // Allocate a buffer for the samples
     int16_t buffer[I2S_READ_LEN * I2S_NUM_CHANNELS];
 
-    // Read samples from the I2S bus
-    size_t bytesRead;
-    i2s_read(I2S_PORT_NUM, &buffer, I2S_READ_LEN * sizeof(int16_t), &bytesRead, portMAX_DELAY);
+    size_t bytesRead = soundHandler.i2sRead(buffer, sizeof(buffer));
 
     // Write the samples to the file
     file.write((uint8_t *)buffer, bytesRead);
@@ -187,49 +178,77 @@ void loop()
       Serial.println("%)");
     }
   }
-
   // Close the file
   file.close();
+}
+
+void goToSleep()
+{
 
   Serial.println("Recording done");
 
-  // Stop the I2S bus
-  i2s_stop(I2S_PORT_NUM);
-
   delay(1000);
-  Serial.println("Going to sleep...");
+  Serial.print("Going to sleep for ");
+  Serial.print(SLEEP_TIME_MS / 1000);
+  Serial.println(" seconds...");
+
+  // get the time in seconds
+  long time = now();
+
+  // add the sleep time to the time
+  time += SLEEP_TIME_MS / 1000;
+  Serial.print("Writing time to eeprom: ");
+  printClock(time);
+  // write the time to the eeprom
+  eepromManager.writeLong(time, TIME_ADDRESS);
+
+  // go to sleep
   esp_sleep_enable_timer_wakeup(SLEEP_TIME_MS * 1000);
   esp_deep_sleep_start();
   Serial.println("Done");
-  ESP.restart();
 }
 
-void i2s_install()
+void printClock(long time)
 {
-  i2s_config_t i2s_config = {
-      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-      .sample_rate = I2S_SAMPLE_RATE,
-      .bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT,
-      .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-      .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-      .intr_alloc_flags = 0, // default interrupt priority
-      .dma_buf_count = 4,
-      .dma_buf_len = I2S_READ_LEN,
-      .use_apll = false};
-
-
-  i2s_driver_install(I2S_PORT_NUM, &i2s_config, 0, NULL);
-  i2s_set_sample_rates(I2S_PORT_NUM, I2S_SAMPLE_RATE); // set sample rates
+  // digital clock display of the time
+  Serial.print(hour(time));
+  printDigits(minute(time));
+  printDigits(second(time));
+  Serial.print(" ");
+  Serial.print(day(time));
+  Serial.print(".");
+  Serial.print(month(time));
+  Serial.print(".");
+  Serial.print(year(time));
+  Serial.println();
 }
 
-void i2s_setpin()
+void printDigits(int digits)
 {
-  const i2s_pin_config_t pin_config = {
-      .bck_io_num = I2S_SCK,
-      .ws_io_num = I2S_WS,
-      .data_out_num = I2S_PIN_NO_CHANGE,
-      .data_in_num = I2S_SD};
+  // utility function for digital clock display: prints preceding colon and leading 0
+  Serial.print(":");
+  if (digits < 10)
+    Serial.print('0');
+  Serial.print(digits);
+}
 
-  i2s_set_pin(I2S_PORT_NUM, &pin_config);
-  i2s_set_clk(I2S_PORT_NUM, I2S_SAMPLE_RATE, I2S_BITS_PER_SAMPLE_16BIT, I2S_CHANNEL_MONO);
+void processSyncMessage()
+{
+  unsigned long pctime;
+  const unsigned long DEFAULT_TIME = 1357041600; // Jan 1 2013
+
+  if (Serial.find(TIME_HEADER))
+  {
+    pctime = Serial.parseInt();
+    if (pctime >= DEFAULT_TIME)
+    {                  // check the integer is a valid time (greater than Jan 1 2013)
+      setTime(pctime); // Sync Arduino clock to the time received on the serial port
+    }
+  }
+}
+
+time_t requestSync()
+{
+  Serial.write(TIME_REQUEST);
+  return 0; // the time will be sent later in response to serial mesg
 }

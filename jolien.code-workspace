@@ -1,0 +1,29 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"files.associations": {
+			"*.css": "tailwindcss",
+			"chrono": "cpp",
+			"xlocale": "cpp",
+			"ostream": "cpp",
+			"*.tcc": "cpp",
+			"xlocmon": "cpp",
+			"xlocnum": "cpp",
+			"xloctime": "cpp",
+			"array": "cpp",
+			"format": "cpp",
+			"istream": "cpp",
+			"memory": "cpp",
+			"tuple": "cpp",
+			"type_traits": "cpp",
+			"utility": "cpp",
+			"xlocmes": "cpp",
+			"xutility": "cpp",
+			"functional": "cpp"
+		}
+	}
+}
