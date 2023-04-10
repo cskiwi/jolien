@@ -1,43 +1,50 @@
-#include <SdFat.h>
+
 #include "FS.h"
 #include "SPI.h"
+#include <SdFat.h>
 #include "Wire.h"
+#include "esp_wifi.h"
+#include "esp_bt.h"
 
 #include <driver/i2s.h>
 #include <math.h>
 #include <Arduino.h>
-
-#define SD_MISO 19
-#define SD_MOSI 23
-#define SD_SCLK 18
-#define SD_CS 5
-
-// SD_FAT_TYPE = 0 for SdFat/File as defined in SdFatConfig.h,
-// 1 for FAT16/FAT32, 2 for exFAT, 3 for FAT16/FAT32 and exFAT.
+#include <TimeLib.h>
 #define SD_FAT_TYPE 2
-//
-// Set DISABLE_CHIP_SELECT to disable a second SPI device.
-// For example, with the Ethernet shield, set DISABLE_CHIP_SELECT
-// to 10 to disable the Ethernet controller.
-const int8_t DISABLE_CHIP_SELECT = -1;
-//
-// Test with reduced SPI speed for breadboards.  SD_SCK_MHZ(4) will select
-// the highest speed supported by the board that is not over 4 MHz.
-// Change SPI_SPEED to SD_SCK_MHZ(50) for best performance.
-#define SPI_SPEED SD_SCK_MHZ(50)
-//------------------------------------------------------------------------------
+
+// SDCARD_SS_PIN is defined for the built-in SD on some boards.
+#ifndef SDCARD_SS_PIN
+const uint8_t SD_CS_PIN = GPIO_NUM_5;
+#else  // SDCARD_SS_PIN
+// Assume built-in SD is used.
+const uint8_t SD_CS_PIN = SDCARD_SS_PIN;
+SDCARD_SS_PIN
+#endif //
+
+// Try max SPI clock for an SD. Reduce SPI_CLOCK if errors occur.
+#define SPI_CLOCK SD_SCK_MHZ(15)
+
+// Try to select the best SD card configuration.
+#if HAS_SDIO_CLASS
+#define SD_CONFIG SdioConfig(FIFO_SDIO)
+#elif ENABLE_DEDICATED_SPI
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, DEDICATED_SPI, SPI_CLOCK)
+#else // HAS_SDIO_CLASS
+#define SD_CONFIG SdSpiConfig(SD_CS_PIN, SHARED_SPI, SPI_CLOCK)
+#endif // HAS_SDIO_CLASS
+
 #if SD_FAT_TYPE == 0
 SdFat sd;
-File file;
+typedef File file_t;
 #elif SD_FAT_TYPE == 1
 SdFat32 sd;
-File32 file;
+typedef File32 file_t;
 #elif SD_FAT_TYPE == 2
 SdExFat sd;
-ExFile file;
+typedef ExFile file_t;
 #elif SD_FAT_TYPE == 3
 SdFs sd;
-FsFile file;
+typedef FsFile file_t;
 #else // SD_FAT_TYPE
 #error Invalid SD_FAT_TYPE
 #endif // SD_FAT_TYPE
@@ -55,8 +62,23 @@ FsFile file;
 // easy format 8 min
 #define SLEEP_TIME_MS (480000) //( 8 * 60 * 1000 )
 
-// keep track if the card is mounted or not
-bool cardMounted = false;
+// Set up the WAV header
+struct wav_header_t
+{
+  char riff[4];         /* "RIFF"                                  */
+  long flength;         /* file length in bytes                    */
+  char wave[4];         /* "WAVE"                                  */
+  char fmt[4];          /* "fmt "                                  */
+  long chunk_size;      /* size of FMT chunk in bytes (usually 16) */
+  short format_tag;     /* 1=PCM, 257=Mu-Law, 258=A-Law, 259=ADPCM */
+  short num_chans;      /* 1=mono, 2=stereo                        */
+  long srate;           /* Sampling rate in samples per second     */
+  long bytes_per_sec;   /* bytes per second = srate*bytes_per_samp */
+  short bytes_per_samp; /* 2=16-bit mono, 4=16-bit stereo          */
+  short bits_per_samp;  /* Number of bits per sample               */
+  char data[4];         /* "data"                                  */
+  long dlength;         /* data length in bytes (filelength - 44)  */
+} wavh;
 
 void setup()
 {
@@ -67,18 +89,23 @@ void setup()
     ; // wait for serial port to connect. Needed for native USB port only
   }
 
-  if (!sd.begin(SD_CS, SPI_SPEED))
+  esp_wifi_set_mode(WIFI_MODE_NULL);
+  esp_bt_controller_disable();
+
+  // wait some time for the serial monitor to open
+  delay(5000);
+  Serial.println("Setup");
+
+  if (!sd.begin(SD_CONFIG))
   {
+    sd.initErrorHalt(&Serial);
     Serial.println("SD card initialization failed!");
     return;
   }
-  else
-  {
-    cardMounted = true;
-  }
 
   uint32_t size = sd.card()->sectorCount();
-  if (size == 0) {
+  if (size == 0)
+  {
     Serial.println("Can't determine the card size.\n");
     return;
   }
@@ -87,157 +114,94 @@ void setup()
   Serial.print(size / 1024);
   Serial.println(" MB");
 
-  delay(10000);
+  delay(1000);
   i2s_install();
   i2s_setpin();
   i2s_start(I2S_PORT_NUM);
 
-  delay(500);
+  delay(5000);
   Serial.println("Setup done");
 }
 
 void loop()
 {
-  if (!cardMounted)
+  uint32_t recordingStartTime = millis();
+  uint32_t recordingEndTime = recordingStartTime + RECORD_TIME_MS;
+  uint32_t recordingProgress = 0;
+
+  char filename[32];
+  sprintf(filename, "/%04d-%02d-%02d_%02d-%02d-%02d.wav", year(), month(), day(), hour(), minute(), second());
+
+  Serial.print("Recording to file: ");
+  Serial.println(filename);
+  file_t file;
+
+  if (!file.open(filename, O_APPEND | O_WRITE | O_CREAT))
   {
+    sd.errorHalt(&Serial, F("open failed"));
     return;
   }
 
-  Serial.println("Start recording");
+  wav_header_t wavh = {
+      {'R', 'I', 'F', 'F'},
+      0, // Placeholder for file length
+      {'W', 'A', 'V', 'E'},
+      {'f', 'm', 't', ' '},
+      16, // FMT chunk size
+      1,  // PCM format
+      I2S_NUM_CHANNELS,
+      I2S_SAMPLE_RATE,
+      I2S_SAMPLE_RATE * I2S_READ_LEN * I2S_NUM_CHANNELS,
+      I2S_NUM_CHANNELS * (I2S_READ_LEN / 2), // bytes per sample = 2 for 16-bit audio
+      16,                                    // 16-bit audio
+      {'d', 'a', 't', 'a'},
+      0 // Placeholder for data length
+  };
 
-  // delete old file
-  // SD.remove("/soundfile.wav");
+  // Write the WAV header to the file
+  file.write((uint8_t *)&wavh, sizeof(wavh));
 
-  // Start recording
-
-  // set sample size
-  static uint32_t samples[I2S_READ_LEN / sizeof(uint32_t)];
-
-  size_t bytes_read;
-  // i2s_read(I2S_PORT_NUM, samples, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
-  writeWaveHeader("/soundfile.wav", I2S_SAMPLE_RATE, sizeof(samples), I2S_NUM_CHANNELS);
-
-  // Record for 2 minutes
-  for (unsigned long start = millis(); millis() - start < RECORD_TIME_MS;)
+  // Record audio samples to the file
+  while (millis() < recordingEndTime)
   {
-    // calculate the remaining time as a percentage
-    int remaining = 100 - ((millis() - start) * 100 / RECORD_TIME_MS);
+    // Allocate a buffer for the samples
+    int16_t buffer[I2S_READ_LEN * I2S_NUM_CHANNELS];
 
-    // print the remaining time as a percentage every 10 seconds
-    if (remaining % 10 == 0)
+    // Read samples from the I2S bus
+    size_t bytesRead;
+    i2s_read(I2S_PORT_NUM, &buffer, I2S_READ_LEN * sizeof(int16_t), &bytesRead, portMAX_DELAY);
+
+    // Write the samples to the file
+    file.write((uint8_t *)buffer, bytesRead);
+
+    // print progress every 10 seconds
+    if (millis() - recordingProgress > 10000)
     {
-      Serial.print("Remaining: ");
-      Serial.print(remaining);
-      Serial.println("%");
+      recordingProgress = millis();
+      Serial.print("Recording progress: ");
+      Serial.print((recordingProgress - recordingStartTime) / 1000);
+      Serial.print(" seconds");
+      // print percentage
+      Serial.print(" (");
+      Serial.print((recordingProgress - recordingStartTime) * 100 / RECORD_TIME_MS);
+      Serial.println("%)");
     }
-
-    size_t bytes_read;
-    i2s_read(I2S_PORT_NUM, samples, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
-
-    // Append audio samples to file
-    appendFile("/soundfile.wav", (const uint8_t *)samples, bytes_read);
   }
 
-  // Stop recording
-  i2s_stop(I2S_PORT_NUM);
+  // Close the file
+  file.close();
 
   Serial.println("Recording done");
 
-  // Sleep for 8 minutes before taking another measurement
-  esp_sleep_enable_timer_wakeup(SLEEP_TIME_MS); // Set sleep timer to 8 minutes
+  // Stop the I2S bus
+  i2s_stop(I2S_PORT_NUM);
+
+  delay(1000);
+  Serial.println("Going to sleep...");
+  esp_sleep_enable_timer_wakeup(SLEEP_TIME_MS * 1000);
   esp_deep_sleep_start();
-  // Enter sleep mode
-}
-
-void readFile(SdExFat &sd, const char *path)
-{
-  Serial.printf("Reading file: %s\n", path);
-
-  file = sd.open(path);
-  if (!file)
-  {
-    Serial.println("Failed to open file for reading");
-    return;
-  }
-
-  Serial.print("Read from file: ");
-  while (file.available())
-  {
-    Serial.write(file.read());
-  }
-  file.close();
-}
-
-void appendFile(const char *path, const void *data, size_t len)
-{
-  // Serial.printf("Appending to file: %s\n", path);
-
-  file = sd.open(path, O_APPEND | O_WRITE | O_CREAT);
-  if (!file)
-  {
-    Serial.println("Failed to open file for appending");
-    return;
-  }
-  if (file.write((const uint8_t *)data, len) == len)
-  {
-    // Serial.println("Data appended");
-  }
-  else
-  {
-    Serial.println("Append failed");
-  }
-  file.close();
-}
-
-void writeWaveHeader(const char *path, uint32_t sampleRate, uint16_t bitsPerSample, uint16_t channels)
-{
-  file = sd.open(path, O_WRITE | O_CREAT);
-  if (!file)
-  {
-    Serial.println("Failed to open file for writing");
-    return;
-  }
-
-  uint16_t blockAlign = channels * bitsPerSample / 8;
-  uint32_t byteRate = sampleRate * blockAlign;
-
-  // Write the RIFF header
-  file.write((const uint8_t *)"RIFF", 4);
-  uint32_t fileSize = file.size() - 8;
-  file.write((const uint8_t *)&fileSize, 4);
-  file.write((const uint8_t *)"WAVE", 4);
-
-  // Write the fmt subchunk
-  file.write((const uint8_t *)"fmt ", 4);
-  uint32_t subchunk1Size = 16;
-  file.write((const uint8_t *)&subchunk1Size, 4);
-  uint16_t audioFormat = 1;
-  file.write((const uint8_t *)&audioFormat, 2);
-  file.write((const uint8_t *)&channels, 2);
-  file.write((const uint8_t *)&sampleRate, 4);
-  file.write((const uint8_t *)&byteRate, 4);
-  file.write((const uint8_t *)&blockAlign, 2);
-  file.write((const uint8_t *)&bitsPerSample, 2);
-
-  // Write the data subchunk header
-  file.write((const uint8_t *)"data", 4);
-  uint32_t subchunk2Size = file.size() - 44;
-  file.write((const uint8_t *)&subchunk2Size, 4);
-
-  file.close();
-}
-
-void deleteFile(const char *path)
-{
-  Serial.printf("Deleting file: %s\n", path);
-  if (sd.remove(path))
-  {
-    Serial.println("File deleted");
-  }
-  else
-  {
-    // Serial.println("Delete failed");
-  }
+  Serial.println("Done");
+  ESP.restart();
 }
 
 void i2s_install()
@@ -253,7 +217,9 @@ void i2s_install()
       .dma_buf_len = I2S_READ_LEN,
       .use_apll = false};
 
+
   i2s_driver_install(I2S_PORT_NUM, &i2s_config, 0, NULL);
+  i2s_set_sample_rates(I2S_PORT_NUM, I2S_SAMPLE_RATE); // set sample rates
 }
 
 void i2s_setpin()

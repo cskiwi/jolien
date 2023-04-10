@@ -7,7 +7,9 @@
             "compilerArgs": [],
             "intelliSenseMode": "windows-msvc-x64",
             "includePath": [
-                "${workspaceFolder}/**"
+                "${workspaceFolder}/**",
+                "C:/Users/glenn/Documents/Arduino/libraries/**",
+                "C:/Users/glenn/AppData/Local/Arduino15/packages/**"
             ],
             "forcedInclude": [],
             "cStandard": "c17",
@@ -235,9 +237,11 @@
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\tools\\sdk\\esp32\\qio_qspi\\include",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\cores\\esp32",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\variants\\uPesy_esp32_wroom_devkit",
-                "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\SdFat\\src",
+                "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\FS\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\SPI\\src",
+                "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\SdFat\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\Wire\\src",
+                "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\Time",
                 "c:\\users\\glenn\\appdata\\local\\arduino15\\packages\\esp32\\tools\\xtensa-esp32-elf-gcc\\esp-2021r2-patch5-8.4.0\\xtensa-esp32-elf\\include\\c++\\8.4.0",
                 "c:\\users\\glenn\\appdata\\local\\arduino15\\packages\\esp32\\tools\\xtensa-esp32-elf-gcc\\esp-2021r2-patch5-8.4.0\\xtensa-esp32-elf\\include\\c++\\8.4.0\\xtensa-esp32-elf",
                 "c:\\users\\glenn\\appdata\\local\\arduino15\\packages\\esp32\\tools\\xtensa-esp32-elf-gcc\\esp-2021r2-patch5-8.4.0\\xtensa-esp32-elf\\include\\c++\\8.4.0\\backward",
