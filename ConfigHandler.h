@@ -1,18 +1,25 @@
 
-#ifndef CARD_READER_H
-#define CARD_READER_H
+#ifndef CONFIG_HANDLER_H
+#define CONFIG_HANDLER_H
+
+#include "CardReader.h"
 
 struct Config
 {
-  String ssid;
-  String time;
-} config;
+  // last time the config was saved
+  unsigned long time;; 
+
+  // initialize the ssid as tracker-01
+  char ssid[11] = "tracker-01";
+};
 
 class ConfigHandler
 {
 public:
-  ConfigHandle(CardHandler cardHandler);
+  ConfigHandler(CardHandler cardHandler);
   void init();
+  void saveConfig();
+  Config config;
 
 private:
   CardHandler _cardHandler;

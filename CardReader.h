@@ -2,6 +2,7 @@
 #define CARD_READER_H
 
 #include <FS.h>
+#include <SD.h>
 #include <SdFat.h>
 #include <driver/i2s.h>
 #include <Arduino.h>
@@ -41,7 +42,8 @@ class CardHandler
 public:
   CardHandler();
   void init();
-  file_t getFile(const char *filename);
+  file_t getFile(const char *filename, uint8_t oflag = O_APPEND | O_WRITE | O_CREAT);
+  void removeFile(const char *filename);
 
 private:
   sd_t _sd;

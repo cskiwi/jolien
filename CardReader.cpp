@@ -2,8 +2,6 @@
 #include "SPI.h"
 #include <SdFat.h>
 #include "Wire.h"
-#include "esp_wifi.h"
-#include "esp_bt.h"
 #include "CardReader.h"
 
 // Try to select the best SD card configuration.
@@ -21,9 +19,7 @@ CardHandler::CardHandler()
 
 void CardHandler::init()
 {
-  Serial.println("CardHandler");
-  delay(5000);
-  Serial.println("Setup");
+  Serial.println("CardHandler Setup");
 
   if (!_sd.begin(SD_CONFIG))
   {
@@ -44,14 +40,35 @@ void CardHandler::init()
   Serial.println(" MB");
 }
 
-file_t CardHandler::getFile(const char *filename)
+file_t CardHandler::getFile(const char *filename, uint8_t oflag)
 {
-  file_t file;
+  #if SD_FAT_TYPE == 0
+    File file;
+  #elif SD_FAT_TYPE == 1
+    File32 file;
+  #elif SD_FAT_TYPE == 2
+    ExFile file;
+  #elif SD_FAT_TYPE == 3
+    FsFile file;
+  #else // SD_FAT_TYPE
+  #error Invalid SD_FAT_TYPE
+  #endif // SD_FAT_TYPE
 
-  if (!file.open(filename, O_APPEND | O_WRITE | O_CREAT))
+  // Open or create
+  if (!file.open(filename, oflag))
   {
-    _sd.errorHalt(&Serial, F("open failed"));
-    return file_t{};
+    _sd.errorHalt(&Serial, "Failed to open file for writing");
+    return file_t();
   }
+
+  // Return
   return file;
+}
+
+void CardHandler::removeFile(const char *filename)
+{
+  if (!_sd.remove(filename))
+  {
+    _sd.errorHalt(&Serial, "Failed to remove file");
+  }
 }

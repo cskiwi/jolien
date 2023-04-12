@@ -5,6 +5,7 @@
 #include "esp_bt.h"
 #include "CardReader.h"
 #include "SoundHandler.h"
+#include "ConfigHandler.h"
 
 // // easy format 2 min
 // #define RECORD_TIME_MS (120000) // ( 2 * 60 * 1000 )
@@ -25,10 +26,7 @@
 // Setup handlers
 CardHandler cardHandler = CardHandler();
 SoundHandler soundHandler = SoundHandler();
-
-//  save configuration to a config.txt file
-char configFileName[12] = "/config.txt";
-
+ConfigHandler configHandler = ConfigHandler(cardHandler);
 
 // depending on the state activate the bleutooth for the app or run in recording mode
 #define STATE_SETUP 0
@@ -44,38 +42,27 @@ void setup()
   {
     ; // wait for serial port to connect. Needed for native USB port only
   }
-  // setSyncProvider( requestSync);  //set function to call when sync required
 
   // disable wifi and bluetooth
   esp_wifi_set_mode(WIFI_MODE_NULL);
   esp_bt_controller_disable();
+
+  // Add some delay so we can see the serial output
+  delay(1000);
 
   try
   {
     // initialize card reader
     cardHandler.init();
 
-    // wait some time for the serial monitor to open
-    delay(1000);
+    Serial.println("Card reader initialized");
 
     // read the config file
-    file_t configFile = cardHandler.getFile(configFileName);
+    configHandler.init();
 
-    // read the config file
-    while (configFile.available())
-    {
-      String line = configFile.readStringUntil('\n');
-      if (line.startsWith("ssid:"))
-      {
-        config.ssid = line.substring(5);
-      }
-      else if (line.startsWith("time:"))
-      {
-        config.time = line.substring(5);
-      }
-    }
+    Serial.println("Config file initialized");
 
-    if (time == 0)
+    if (configHandler.config.time == 0)
     {
       // set time to 12:00:00 1.1.2020 if not set
       setTime(12, 0, 0, 1, 1, 2020);
@@ -83,17 +70,14 @@ void setup()
     else
     {
       // set the time
-      setTime(time);
+      setTime(configHandler.config.time);
     }
 
-    Serial.print("Time to: ");
-    printClock(time);
+    Serial.print("Loaded time: ");
+    printClock(configHandler.config.time);
 
     // initialize sound handler
     soundHandler.init();
-
-    // wait some time for the serial monitor to open
-    delay(5000);
   }
   catch (const std::exception &e)
   {
@@ -117,15 +101,8 @@ void loop()
     break;
   case STATE_SETUP:
   default:
-    // setup the time
-    int currentTime = now();
-
     // set state to recording
     state = STATE_RECORDING;
-
-    // Print some info
-    Serial.print("Current time: ");
-    Serial.println(currentTime);
     break;
   }
 }
@@ -197,10 +174,10 @@ void goToSleep()
 
   // add the sleep time to the time
   time += SLEEP_TIME_MS / 1000;
-  Serial.print("Writing time to eeprom: ");
-  printClock(time);
+
   // write the time to the eeprom
-  eepromManager.writeLong(time, TIME_ADDRESS);
+  configHandler.config.time = time;
+  configHandler.saveConfig();
 
   // go to sleep
   esp_sleep_enable_timer_wakeup(SLEEP_TIME_MS * 1000);
@@ -230,25 +207,4 @@ void printDigits(int digits)
   if (digits < 10)
     Serial.print('0');
   Serial.print(digits);
-}
-
-void processSyncMessage()
-{
-  unsigned long pctime;
-  const unsigned long DEFAULT_TIME = 1357041600; // Jan 1 2013
-
-  if (Serial.find(TIME_HEADER))
-  {
-    pctime = Serial.parseInt();
-    if (pctime >= DEFAULT_TIME)
-    {                  // check the integer is a valid time (greater than Jan 1 2013)
-      setTime(pctime); // Sync Arduino clock to the time received on the serial port
-    }
-  }
-}
-
-time_t requestSync()
-{
-  Serial.write(TIME_REQUEST);
-  return 0; // the time will be sent later in response to serial mesg
 }
