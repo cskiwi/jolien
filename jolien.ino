@@ -1,4 +1,3 @@
-#include <WiFiClientSecure.h>
 #include <Arduino.h>
 #include <TimeLib.h>
 #include "esp_wifi.h"
@@ -6,9 +5,12 @@
 #include "CardReader.h"
 #include "SoundHandler.h"
 #include "ConfigHandler.h"
+#include "ApiHandler.h"
+#include "Tracker.h"
 #include <WiFi.h>
-#include <WiFiClient.h>
 #include "Timer.h"
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 // // easy format 2 min
 // #define RECORD_TIME_MS (120000) // ( 2 * 60 * 1000 )
@@ -26,11 +28,22 @@
 #define TIME_HEADER "T" // Header tag for serial time sync message
 #define TIME_REQUEST 7  // ASCII bell character requests a time sync message
 
+const char *ssid = "tracker-hotspot";
+const char *password = "love-you";
+const char *server = "https://gull.purr.dev"; // Server URL
+const char *apiKey = "1234567890";            // Your API key
+
 // Setup handlers
 CardHandler cardHandler = CardHandler();
 SoundHandler soundHandler = SoundHandler();
 ConfigHandler configHandler = ConfigHandler(cardHandler);
-WiFiClientSecure client;
+ApiHandler apiHandler(apiKey);
+
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org");
+
+// tracker info
+Tracker tracker = Tracker();
 
 // depending on the state activate the bleutooth for the app or run in recording mode
 #define STATE_SETUP 0
@@ -38,42 +51,9 @@ WiFiClientSecure client;
 #define STATE_IDLE 3
 
 int state = STATE_SETUP;
+bool pingingApi = false;
 
-const char *ssid = "tracker-hotspot";
-const char *password = "love-you";
-const char *server = "gull.purr.dev"; // Server URL
-const char *purr_ca =
-    "-----BEGIN CERTIFICATE-----\n"
-    "MIIFJDCCBAygAwIBAgISBCwxu/lBFOgF/ydGslJ4zcQBMA0GCSqGSIb3DQEBCwUA\n"
-    "MDIxCzAJBgNVBAYTAlVTMRYwFAYDVQQKEw1MZXQncyBFbmNyeXB0MQswCQYDVQQD\n"
-    "EwJSMzAeFw0yMzAyMTcxNDExNTVaFw0yMzA1MTgxNDExNTRaMBUxEzARBgNVBAMM\n"
-    "CioucHVyci5kZXYwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCqfyNd\n"
-    "zrAxhG7zDGP73Ezd+4nn7xatoFdOxecR4WfnpvDJGTz1BBuvlaXyMPem5k35OC3q\n"
-    "SRYOLvMNTQJZce7+A82O3uMTDCPQvkV3UNbulYksWuCuf97HZpxWqkc/s2bFzEn8\n"
-    "YSNWf447N21WMsRMTuIDf5fPybbbttVt7BXM/Vi5YlsLAmblgutqqQabUkmz71UT\n"
-    "6CGsV2WRkM/xHfPDrKDqPME05s+T1Lh/hZcnZR+d94qmwhWbgrEDT6gMPkGstzmd\n"
-    "IgrjNF/CiThWXMNgen6kfu5NEG2aOkoNtkB/7dTva1x14SX0IIz1UWBFsZD7T8NY\n"
-    "kXUFmVdnFx/gQ0A7AgMBAAGjggJPMIICSzAOBgNVHQ8BAf8EBAMCBaAwHQYDVR0l\n"
-    "BBYwFAYIKwYBBQUHAwEGCCsGAQUFBwMCMAwGA1UdEwEB/wQCMAAwHQYDVR0OBBYE\n"
-    "FNd6To+GEHIyUlXEJiNLgEem19B7MB8GA1UdIwQYMBaAFBQusxe3WFbLrlAJQOYf\n"
-    "r52LFMLGMFUGCCsGAQUFBwEBBEkwRzAhBggrBgEFBQcwAYYVaHR0cDovL3IzLm8u\n"
-    "bGVuY3Iub3JnMCIGCCsGAQUFBzAChhZodHRwOi8vcjMuaS5sZW5jci5vcmcvMB8G\n"
-    "A1UdEQQYMBaCCioucHVyci5kZXaCCHB1cnIuZGV2MEwGA1UdIARFMEMwCAYGZ4EM\n"
-    "AQIBMDcGCysGAQQBgt8TAQEBMCgwJgYIKwYBBQUHAgEWGmh0dHA6Ly9jcHMubGV0\n"
-    "c2VuY3J5cHQub3JnMIIBBAYKKwYBBAHWeQIEAgSB9QSB8gDwAHUAtz77JN+cTbp1\n"
-    "8jnFulj0bF38Qs96nzXEnh0JgSXttJkAAAGGX+6TFwAABAMARjBEAiBA505CJPnA\n"
-    "+2E+vg/epefMfRkWH6fj+KN7hzes5shJxAIgapGSmtyTLLK/XrviZV6uBXehVAHJ\n"
-    "Gf6Gs7kSDKf+kYsAdwB6MoxU2LcttiDqOOBSHumEFnAyE4VNO9IrwTpXo1LrUgAA\n"
-    "AYZf7pM2AAAEAwBIMEYCIQCNUK/S39QcwCZHUtleWMV3NJ66gAxFBKXmCjhB+6we\n"
-    "lgIhAOav/N/uOrMux45jsNdadgGUqy7FECF7aUgM2QjRVqmAMA0GCSqGSIb3DQEB\n"
-    "CwUAA4IBAQAdH/CCaOT+7vrAd8+TAlt6Zd/Ad8f5xuqyXTDhpvQsreSDqGbKtD9h\n"
-    "ZbgdhGzmFNlE/T/T4bboby+G3Ttw+32dSy/8bFbQHFnqyy3HZS09lkhhUDYUGh77\n"
-    "vzqDyp6YK5N7YsRDNHoKo0UxZXPi5qSxv8P2Gq/XIbltXtEjnvEcBVrCTV1vQ+Xg\n"
-    "vB5Hgcbqp/xGUx9dmGbAfMHiMfpM6xt49NDo4hKiyVMDWlSjNVNVJrLgXIdKXEtC\n"
-    "XYN50u+l/lGmOKvCKZXOQEa6erTekAmnvfZSq+8Ekf+S1PvJcFWBL/NAUq6hSih2\n"
-    "zj87Fd/khOMK80Fbbv3BURBd/O7GnFhD\n"
-    "-----END CERTIFICATE-----\n";
-
+//
 void setup()
 {
   Serial.begin(115200);
@@ -103,52 +83,54 @@ void setup()
   Serial.print("Subnet mask: ");
   Serial.println(WiFi.subnetMask());
 
-  client.setCACert(purr_ca);
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-
   // disable bluetooth
   esp_bt_controller_disable();
 
   // Add some delay so we can see the serial output
-  delay(1000);
+  try
+  {
+    // initialize card reader
+    cardHandler.init();
+    Serial.println("Card reader initialized");
 
-  // try
-  // {
-  //   // initialize card reader
-  //   cardHandler.init();
+    // read the config file
+    configHandler.init();
 
-  //   Serial.println("Card reader initialized");
+    // start by setting the time from the config
+    setTime(configHandler.config.time);
 
-  //   // read the config file
-  //   configHandler.init();
+    // set tracker info
+    tracker.name = configHandler.config.ssid;
 
-  //   Serial.println("Config file initialized");
+    // initialize the time client
+    timeClient.begin();
+    timeClient.setTimeOffset(3600 * 2);
+    timeClient.update();
 
-  //   if (configHandler.config.time == 0)
-  //   {
-  //     // set time to 12:00:00 1.1.2020 if not set
-  //     setTime(12, 0, 0, 1, 1, 2020);
-  //   }
-  //   else
-  //   {
-  //     // set the time
-  //     setTime(configHandler.config.time);
-  //   }
+    // wait for the time to be set
+    delay(1000);
 
-  //   Serial.print("Loaded time: ");
-  //   printClock(configHandler.config.time);
+    // print the time
+    Serial.print("Time: ");
+    printClock(timeClient.getEpochTime());
 
-  //   // initialize sound handler
-  //   soundHandler.init();
-  // }
-  // catch (const std::exception &e)
-  // {
-  //   Serial.println(e.what());
-  //   while (true)
-  //   {
-  //     delay(1000);
-  //   }
-  // }
+    //  save the config
+    configHandler.saveConfig();
+
+    // initialize api handler
+    apiHandler.setEndpoint(server, ssid);
+
+    // // initialize sound handler
+    // soundHandler.init();
+  }
+  catch (const std::exception &e)
+  {
+    Serial.println(e.what());
+    while (true)
+    {
+      delay(1000);
+    }
+  }
 }
 
 void loop()
@@ -160,7 +142,19 @@ void loop()
     // ping the api every minute
     if (second() == 0)
     {
-      pingApi();
+      apiHandler.pingTrackerStatus();
+
+      if (apiHandler.shouldStartLogging())
+      {
+        tracker.startLog = now();
+        apiHandler.updateTrackerStatus(tracker);
+        // disable wifi if enabled
+        if (WiFi.status() == WL_CONNECTED)
+        {
+          WiFi.disconnect();
+        }
+        state = STATE_RECORDING;
+      }
     }
 
     break;
@@ -175,6 +169,8 @@ void loop()
     state = STATE_IDLE;
     break;
   }
+
+  delay(100);
 }
 
 void recordingLoop()
@@ -279,39 +275,56 @@ void printDigits(int digits)
   Serial.print(digits);
 }
 
-void pingApi()
-{
-  Serial.println("\nStarting connection to server...");
-  if (!client.connect(server, 443))
-    Serial.println("Connection failed!");
-  else
-  {
-    Serial.println("Connected to server!");
-    // Make a HTTP request:
-    client.println("GET http://localhost:3000/api/trackers/5113 HTTP/1.0");
-    client.println("Host: gull.purr.dev");
-    client.println("Connection: close");
-    client.println("Content-Type: application/json");
-    client.println("x-api-key: 123456789"); // added header
-    client.println();
+// void pingApi()
+// {
+//   if (pingingApi)
+//   {
+//     return;
+//   }
 
-    while (client.connected())
-    {
-      String line = client.readStringUntil('\n');
-      if (line == "\r")
-      {
-        Serial.println("headers received");
-        break;
-      }
-    }
-    // if there are incoming bytes available
-    // from the server, read them and print them:
-    while (client.available())
-    {
-      char c = client.read();
-      Serial.write(c);
-    }
+//   pingingApi = true;
 
-    client.stop();
-  }
-}
+//   Serial.println("Pinging API...");
+
+//   HTTPClient http;
+//   String serverPath = String(server) + "/api/trackers/" + String(configHandler.config.ssid);
+//   Serial.println(serverPath);
+//   http.begin(serverPath.c_str());
+//   http.addHeader("Content-Type", "application/json");
+//   http.addHeader("x-api-key", "123456789");
+
+//   // Send HTTP GET request
+//   int httpResponseCode = http.GET();
+
+//   if (httpResponseCode > 0)
+//   {
+//     Serial.print("HTTP Response code: ");
+//     Serial.println(httpResponseCode);
+//     String payload = http.getString();
+//     Serial.println(payload);
+
+//     // deserialize json
+//     DynamicJsonDocument doc(1024);
+//     // payload: {"tracker":{"id":2,"name":"tracker-2","description":null,"nestId":null,"lastHeard":"2023-04-30T15:35:58.641Z","shouldSync":true,"shouldLog":false}}
+//     deserializeJson(doc, payload);
+
+//     // check if sync flag is set
+
+//     bool shouldLog = doc["tracker"]["shouldLog"];
+
+//     if (shouldLog)
+//     {
+//       // set state to recording
+//       state = STATE_RECORDING;
+//     }
+//   }
+//   else
+//   {
+//     Serial.print("Error code: ");
+//     Serial.println(httpResponseCode);
+//   }
+//   // Free resources
+//   http.end();
+
+//   pingingApi = false;
+// }

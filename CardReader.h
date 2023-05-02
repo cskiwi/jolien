@@ -19,7 +19,7 @@ SDCARD_SS_PIN
 #endif //
 
 // Try max SPI clock for an SD. Reduce SPI_CLOCK if errors occur.
-#define SPI_CLOCK SD_SCK_MHZ(15)
+#define SPI_CLOCK SD_SCK_MHZ(5)
 
 #if SD_FAT_TYPE == 0
 typedef File file_t;
