@@ -61,7 +61,7 @@ void setup()
   }
 
   // lower the cpu frequency to save power
-  setCpuFrequencyMhz(40);
+  setCpuFrequencyMhz(80);
 
   Freq = getCpuFrequencyMhz();
   Serial.print("CPU Freq = ");
@@ -75,35 +75,16 @@ void setup()
   Serial.print("APB Freq = ");
   Serial.print(Freq);
   Serial.println(" Hz");
-
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
-  }
-  Serial.println("Connected to WiFi");
-
-  // Print the local IP address
-  Serial.print("Local IP address: ");
-  Serial.println(WiFi.localIP());
-
-  // print the gateway IP address
-  Serial.print("Gateway IP address: ");
-  Serial.println(WiFi.gatewayIP());
-
-  // print the subnet mask
-  Serial.print("Subnet mask: ");
-  Serial.println(WiFi.subnetMask());
-
+  
+  // give some breath room for the trackers
+  delay(1000);
+  connectToWifi();
   // disable bluetooth
   esp_bt_controller_disable();
 
   // Add some delay so we can see the serial output
   try
   {
-    // give some breath room for the trackers
-    delay(1000);
 
     // initialize card reader
     cardHandler.init();
@@ -315,4 +296,27 @@ void goToDeepSleep(uint64_t DEEP_SLEEP_TIME)
 
   // Go to sleep! Zzzz
   esp_deep_sleep_start();
+}
+
+void connectToWifi()
+{
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED)
+  {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
+
+  // Print the local IP address
+  Serial.print("Local IP address: ");
+  Serial.println(WiFi.localIP());
+
+  // print the gateway IP address
+  Serial.print("Gateway IP address: ");
+  Serial.println(WiFi.gatewayIP());
+
+  // print the subnet mask
+  Serial.print("Subnet mask: ");
+  Serial.println(WiFi.subnetMask());
 }
