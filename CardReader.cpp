@@ -19,40 +19,56 @@ CardHandler::CardHandler()
 
 void CardHandler::init()
 {
-  Serial.println("CardHandler Setup");
-
-  if (!_sd.begin(SD_CONFIG))
+  try
   {
-    _sd.initErrorHalt(&Serial);
-    Serial.println("SD card initialization failed!");
-    return;
-  }
+    Serial.println("CardHandler Setup");
 
-  uint32_t size = _sd.card()->sectorCount();
-  if (size == 0)
+    delay(1000);
+
+    if (!_sd.begin(SD_CONFIG))
+    {
+      Serial.println("SD card initialization failed!");
+      _sd.initErrorHalt(&Serial);
+      return;
+    }
+
+    uint32_t size = _sd.card()->sectorCount();
+    if (size == 0)
+    {
+      Serial.println("Can't determine the card size.\n");
+      return;
+    }
+
+    Serial.print("Card size: ");
+    Serial.print(size / 1024);
+    Serial.println(" MB");
+  }
+  catch (const std::exception &e)
   {
-    Serial.println("Can't determine the card size.\n");
-    return;
-  }
+    Serial.println("CardHandler Setup Failed");
 
-  Serial.print("Card size: ");
-  Serial.print(size / 1024);
-  Serial.println(" MB");
+    Serial.print("Exception: ");
+    Serial.println(e.what());
+  }
+  catch (...)
+  {
+    Serial.println("CardHandler Setup Failed");
+  }
 }
 
 file_t CardHandler::getFile(const char *filename, uint8_t oflag)
 {
-  #if SD_FAT_TYPE == 0
-    File file;
-  #elif SD_FAT_TYPE == 1
-    File32 file;
-  #elif SD_FAT_TYPE == 2
-    ExFile file;
-  #elif SD_FAT_TYPE == 3
-    FsFile file;
-  #else // SD_FAT_TYPE
-  #error Invalid SD_FAT_TYPE
-  #endif // SD_FAT_TYPE
+#if SD_FAT_TYPE == 0
+  File file;
+#elif SD_FAT_TYPE == 1
+  File32 file;
+#elif SD_FAT_TYPE == 2
+  ExFile file;
+#elif SD_FAT_TYPE == 3
+  FsFile file;
+#else // SD_FAT_TYPE
+#error Invalid SD_FAT_TYPE
+#endif // SD_FAT_TYPE
 
   // Open or create
   if (!file.open(filename, oflag))
@@ -71,4 +87,9 @@ void CardHandler::removeFile(const char *filename)
   {
     _sd.errorHalt(&Serial, "Failed to remove file");
   }
+}
+
+void CardHandler::closeFile(file_t file)
+{
+  file.close();
 }

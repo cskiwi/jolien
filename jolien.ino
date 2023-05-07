@@ -22,16 +22,11 @@
 // easy format 10 sec
 #define SLEEP_TIME_MS (10000) //( 1 * 10 * 1000 )
 
-// adresses for the eeprom
-#define TIME_ADDRESS 0
-
-#define TIME_HEADER "T" // Header tag for serial time sync message
-#define TIME_REQUEST 7  // ASCII bell character requests a time sync message
-
 const char *ssid = "tracker-hotspot";
 const char *password = "love-you";
-const char *server = "https://gull.purr.dev"; // Server URL
-const char *apiKey = "1234567890";            // Your API key
+// const char *server = "https://gull.purr.dev"; // Server URL
+const char *server = "http://192.168.1.253:3000"; // Server URL
+const char *apiKey = "123456789";                 // Your API key
 
 // Setup handlers
 CardHandler cardHandler = CardHandler();
@@ -52,6 +47,8 @@ Tracker tracker = Tracker();
 
 int state = STATE_SETUP;
 bool pingingApi = false;
+bool initalStartup = true;
+uint32_t Freq = 0;
 
 //
 void setup()
@@ -62,6 +59,22 @@ void setup()
   {
     ; // wait for serial port to connect. Needed for native USB port only
   }
+
+  // lower the cpu frequency to save power
+  setCpuFrequencyMhz(40);
+
+  Freq = getCpuFrequencyMhz();
+  Serial.print("CPU Freq = ");
+  Serial.print(Freq);
+  Serial.println(" MHz");
+  Freq = getXtalFrequencyMhz();
+  Serial.print("XTAL Freq = ");
+  Serial.print(Freq);
+  Serial.println(" MHz");
+  Freq = getApbFrequency();
+  Serial.print("APB Freq = ");
+  Serial.print(Freq);
+  Serial.println(" Hz");
 
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
@@ -89,6 +102,9 @@ void setup()
   // Add some delay so we can see the serial output
   try
   {
+    // give some breath room for the trackers
+    delay(1000);
+
     // initialize card reader
     cardHandler.init();
     Serial.println("Card reader initialized");
@@ -118,7 +134,7 @@ void setup()
     configHandler.saveConfig();
 
     // initialize api handler
-    apiHandler.setEndpoint(server, ssid);
+    apiHandler.setEndpoint(server, tracker.name);
 
     // // initialize sound handler
     // soundHandler.init();
@@ -135,42 +151,68 @@ void setup()
 
 void loop()
 {
-
-  switch (state)
+  try
   {
-  case STATE_IDLE:
-    // ping the api every minute
-    if (second() == 0)
-    {
-      apiHandler.pingTrackerStatus();
 
-      if (apiHandler.shouldStartLogging())
+    switch (state)
+    {
+    case STATE_IDLE:
+      // ping the api every minute
+      if (second() == 0 || initalStartup)
       {
-        tracker.startLog = now();
-        apiHandler.updateTrackerStatus(tracker);
-        // disable wifi if enabled
-        if (WiFi.status() == WL_CONNECTED)
+        initalStartup = false;
+        apiHandler.pingTrackerStatus();
+
+        Serial.println("Checkinf if logging");
+
+        if (apiHandler.shouldStartLogging())
         {
-          WiFi.disconnect();
+          Serial.println("Start logging");
+
+          tracker.startLog = now();
+          tracker.shouldLog = false;
+
+          Serial.println("Letting API know");
+          apiHandler.updateTrackerStatus(tracker);
+
+          Serial.println("disable wifi");
+          // disable wifi if enabled
+          if (WiFi.status() == WL_CONNECTED)
+          {
+            WiFi.disconnect();
+          }
+          Serial.println("switch states");
+          state = STATE_RECORDING;
         }
-        state = STATE_RECORDING;
+        else
+        {
+          Serial.println("nothing to do");
+        }
       }
+
+      break;
+
+    case STATE_RECORDING:
+      // recordingLoop();
+      goToDeepSleep(SLEEP_TIME_MS);
+      break;
+    case STATE_SETUP:
+    default:
+      // set state to recording
+      state = STATE_IDLE;
+      break;
     }
 
-    break;
-
-  case STATE_RECORDING:
-    // recordingLoop();
-    goToSleep();
-    break;
-  case STATE_SETUP:
-  default:
-    // set state to recording
-    state = STATE_IDLE;
-    break;
+    delay(100);
   }
-
-  delay(100);
+  catch (const std::exception &e)
+  {
+    Serial.println(e.what());
+    while (true)
+    {
+      delay(1000);
+    }
+  }
 }
 
 void recordingLoop()
@@ -222,33 +264,7 @@ void recordingLoop()
     }
   }
   // Close the file
-  file.close();
-}
-
-void goToSleep()
-{
-
-  Serial.println("Recording done");
-
-  delay(1000);
-  Serial.print("Going to sleep for ");
-  Serial.print(SLEEP_TIME_MS / 1000);
-  Serial.println(" seconds...");
-
-  // get the time in seconds
-  long time = now();
-
-  // add the sleep time to the time
-  time += SLEEP_TIME_MS / 1000;
-
-  // write the time to the eeprom
-  configHandler.config.time = time;
-  configHandler.saveConfig();
-
-  // go to sleep
-  esp_sleep_enable_timer_wakeup(SLEEP_TIME_MS * 1000);
-  esp_deep_sleep_start();
-  Serial.println("Done");
+  cardHandler.closeFile(file);
 }
 
 void printClock(long time)
@@ -275,56 +291,28 @@ void printDigits(int digits)
   Serial.print(digits);
 }
 
-// void pingApi()
-// {
-//   if (pingingApi)
-//   {
-//     return;
-//   }
+void goToDeepSleep(uint64_t DEEP_SLEEP_TIME)
+{
+  Serial.println("Going to sleep...");
 
-//   pingingApi = true;
+  // add the sleep time to the time
+  long time = now();
+  time += SLEEP_TIME_MS / 1000;
+  // write the time to the eeprom
+  configHandler.config.time = time;
+  configHandler.saveConfig();
 
-//   Serial.println("Pinging API...");
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+  btStop();
 
-//   HTTPClient http;
-//   String serverPath = String(server) + "/api/trackers/" + String(configHandler.config.ssid);
-//   Serial.println(serverPath);
-//   http.begin(serverPath.c_str());
-//   http.addHeader("Content-Type", "application/json");
-//   http.addHeader("x-api-key", "123456789");
+  adc_power_off();
+  esp_wifi_stop();
+  esp_bt_controller_disable();
 
-//   // Send HTTP GET request
-//   int httpResponseCode = http.GET();
+  // Configure the timer to wake us up!
+  esp_sleep_enable_timer_wakeup(DEEP_SLEEP_TIME * 60L * 1000000L);
 
-//   if (httpResponseCode > 0)
-//   {
-//     Serial.print("HTTP Response code: ");
-//     Serial.println(httpResponseCode);
-//     String payload = http.getString();
-//     Serial.println(payload);
-
-//     // deserialize json
-//     DynamicJsonDocument doc(1024);
-//     // payload: {"tracker":{"id":2,"name":"tracker-2","description":null,"nestId":null,"lastHeard":"2023-04-30T15:35:58.641Z","shouldSync":true,"shouldLog":false}}
-//     deserializeJson(doc, payload);
-
-//     // check if sync flag is set
-
-//     bool shouldLog = doc["tracker"]["shouldLog"];
-
-//     if (shouldLog)
-//     {
-//       // set state to recording
-//       state = STATE_RECORDING;
-//     }
-//   }
-//   else
-//   {
-//     Serial.print("Error code: ");
-//     Serial.println(httpResponseCode);
-//   }
-//   // Free resources
-//   http.end();
-
-//   pingingApi = false;
-// }
+  // Go to sleep! Zzzz
+  esp_deep_sleep_start();
+}

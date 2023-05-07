@@ -55,7 +55,7 @@ void ConfigHandler::init()
   Serial.printf("time:%ld\r\n", config.time);
 
   // Close the file
-  configFile.close();
+  this->_cardHandler.closeFile(configFile);
 }
 
 void ConfigHandler::saveConfig()
@@ -71,6 +71,6 @@ void ConfigHandler::saveConfig()
   configFile.printf("time:%ld\r\n", config.time);
 
   // Save the new config to the file
-  configFile.close();
+  this->_cardHandler.closeFile(configFile);
   Serial.println(F("Done"));
 }

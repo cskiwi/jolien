@@ -7,16 +7,19 @@ ApiHandler::ApiHandler(const char *apiKey)
 {
 }
 
-void ApiHandler::setEndpoint(const char *server, const char *ssid)
+void ApiHandler::setEndpoint(const char *server, String ssid)
 {
-  this->_serverPath = String(server) + "/api/trackers/" + String(ssid);
+  this->_serverPath = String(server) + "/api/trackers/" + ssid;
 }
 
-void ApiHandler::updateTrackerStatus(const Tracker& tracker)
+void ApiHandler::updateTrackerStatus(const Tracker &tracker)
 {
   this->_client.begin(this->_serverPath.c_str());
   this->_client.addHeader("Content-Type", "application/json");
   this->_client.addHeader("x-api-key", this->_apiKey);
+
+  Serial.print("Adding api key: ");
+  Serial.println(this->_apiKey);
 
   // Prepare payload
   DynamicJsonDocument doc(1024);
@@ -50,6 +53,9 @@ void ApiHandler::pingTrackerStatus()
   this->_client.begin(this->_serverPath.c_str());
   this->_client.addHeader("Content-Type", "application/json");
   this->_client.addHeader("x-api-key", this->_apiKey);
+
+  Serial.print("Adding api key: ");
+  Serial.println(this->_apiKey);
 
   // Send HTTP GET request
   int httpResponseCode = this->_client.GET();
@@ -87,14 +93,19 @@ void ApiHandler::pingTrackerStatus()
     Serial.print("Error code: ");
     Serial.println(httpResponseCode);
   }
+
+  Serial.print("Freeing resources");
+
   // Free resources
   this->_client.end();
 }
 
 bool ApiHandler::shouldStartLogging()
 {
+  return this->_shouldLog;
 }
 
 bool ApiHandler::shouldStartSyncing()
 {
+  return this->_shouldSync;
 }

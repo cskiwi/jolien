@@ -11,7 +11,7 @@ class ApiHandler
 {
 public:
   ApiHandler(const char *apiKey);
-  void setEndpoint(const char *server, const char *ssid);
+  void setEndpoint(const char *server, String ssid);
   void updateTrackerStatus(const Tracker& tracker);
   void pingTrackerStatus();
   bool shouldStartLogging();
