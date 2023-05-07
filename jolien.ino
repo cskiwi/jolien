@@ -18,9 +18,9 @@
 // #define SLEEP_TIME_MS (480000) //( 8 * 60 * 1000 )
 
 // // easy format 2 min
-#define RECORD_TIME_MS (120000) // ( 1 * 60 * 1000 )
-// easy format 10 sec
-#define SLEEP_TIME_MS (10000) //( 1 * 10 * 1000 )
+#define RECORD_TIME_US (1 * 60 * 1000 * 1000) // ( 1 * 60 * 1000 )
+// easy format 1 min
+#define SLEEP_TIME_US (1 * 60 * 1000 * 1000) //( 1 *  60* 1000 )
 
 const char *ssid = "tracker-hotspot";
 const char *password = "love-you";
@@ -75,7 +75,7 @@ void setup()
   Serial.print("APB Freq = ");
   Serial.print(Freq);
   Serial.println(" Hz");
-  
+
   // give some breath room for the trackers
   delay(1000);
   connectToWifi();
@@ -128,6 +128,17 @@ void setup()
       delay(1000);
     }
   }
+
+  // print clear message that setup is done
+  Serial.println("");
+  Serial.println("");
+  Serial.println("");
+  Serial.println("===================");
+  Serial.println("Setup done");
+  Serial.println("===================");
+  Serial.println("");
+  Serial.println("");
+  Serial.println("");
 }
 
 void loop()
@@ -150,7 +161,7 @@ void loop()
         {
           Serial.println("Start logging");
 
-          tracker.startLog = now();
+          tracker.startLog = timeClient.getEpochTime();
           tracker.shouldLog = false;
 
           Serial.println("Letting API know");
@@ -199,7 +210,7 @@ void loop()
 void recordingLoop()
 {
   uint32_t recordingStartTime = millis();
-  uint32_t recordingEndTime = recordingStartTime + RECORD_TIME_MS;
+  uint32_t recordingEndTime = recordingStartTime + RECORD_TIME_US / 1000;
   uint32_t recordingProgress = 0;
 
   char filename[32];
@@ -240,7 +251,7 @@ void recordingLoop()
       Serial.print(" seconds");
       // print percentage
       Serial.print(" (");
-      Serial.print((recordingProgress - recordingStartTime) * 100 / RECORD_TIME_MS);
+      Serial.print((recordingProgress - recordingStartTime) * 100 / (RECORD_TIME_US / 1000));
       Serial.println("%)");
     }
   }
@@ -272,17 +283,23 @@ void printDigits(int digits)
   Serial.print(digits);
 }
 
+// get the deep sleep time in us
 void goToDeepSleep(uint64_t DEEP_SLEEP_TIME)
 {
   Serial.println("Going to sleep...");
 
   // add the sleep time to the time
-  long time = now();
-  time += SLEEP_TIME_MS / 1000;
+  long time = timeClient.getEpochTime();
+  time += DEEP_SLEEP_TIME / 1000 / 1000;
   // write the time to the eeprom
   configHandler.config.time = time;
   configHandler.saveConfig();
 
+  // print wake up time
+  Serial.print("Wake up time: ");
+  printClock(time);
+
+  // disconnect wifi and bt
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
   btStop();
@@ -292,7 +309,7 @@ void goToDeepSleep(uint64_t DEEP_SLEEP_TIME)
   esp_bt_controller_disable();
 
   // Configure the timer to wake us up!
-  esp_sleep_enable_timer_wakeup(DEEP_SLEEP_TIME * 60L * 1000000L);
+  esp_sleep_enable_timer_wakeup(DEEP_SLEEP_TIME);
 
   // Go to sleep! Zzzz
   esp_deep_sleep_start();

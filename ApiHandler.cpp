@@ -94,8 +94,6 @@ void ApiHandler::pingTrackerStatus()
     Serial.println(httpResponseCode);
   }
 
-  Serial.print("Freeing resources");
-
   // Free resources
   this->_client.end();
 }
