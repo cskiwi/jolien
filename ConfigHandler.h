@@ -7,7 +7,10 @@
 struct Config
 {
   // last time the config was saved
-  unsigned long time;; 
+  unsigned long time;
+
+  // state of tracker
+  int state;
 
   // initialize the ssid as tracker-01
   char ssid[11] = "tracker-01";

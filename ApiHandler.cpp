@@ -24,10 +24,14 @@ void ApiHandler::updateTrackerStatus(const Tracker &tracker)
   // Prepare payload
   DynamicJsonDocument doc(1024);
   JsonObject trackerObj = doc.createNestedObject("tracker");
-  trackerObj["startSync"] = tracker.startSync;
-  trackerObj["startLog"] = tracker.startLog;
+  trackerObj["startedSyncOn"] = tracker.startedSyncOn;
+  trackerObj["startedLogOn"] = tracker.startedLogOn;
+  trackerObj["shouldLog"] = tracker.shouldLog;
+  trackerObj["shouldSync"] = tracker.shouldSync;
   String payload;
   serializeJson(doc, payload);
+  Serial.print("Payload POST: ");
+  Serial.println(payload);
 
   // Send HTTP PUT request
   int httpResponseCode = this->_client.POST(payload);
@@ -37,6 +41,7 @@ void ApiHandler::updateTrackerStatus(const Tracker &tracker)
     Serial.print("HTTP Response code: ");
     Serial.println(httpResponseCode);
     String response = this->_client.getString();
+    Serial.print("Result POST: ");
     Serial.println(response);
   }
   else
@@ -48,7 +53,8 @@ void ApiHandler::updateTrackerStatus(const Tracker &tracker)
   this->_client.end();
 }
 
-void ApiHandler::pingTrackerStatus()
+// ping and update tracker instance
+void ApiHandler::pingTrackerStatus(Tracker &tracker)
 {
   this->_client.begin(this->_serverPath.c_str());
   this->_client.addHeader("Content-Type", "application/json");
@@ -65,28 +71,21 @@ void ApiHandler::pingTrackerStatus()
     Serial.print("HTTP Response code: ");
     Serial.println(httpResponseCode);
     String payload = this->_client.getString();
+    Serial.print("Result GET: ");
     Serial.println(payload);
 
     // deserialize json
     DynamicJsonDocument doc(1024);
-    // payload: {"tracker":{"id":2,"name":"tracker-2","description":null,"nestId":null,"lastHeard":"2023-04-30T15:35:58.641Z","shouldSync":true,"shouldLog":false}}
     deserializeJson(doc, payload);
 
-    // check if sync flag is set
-
-    bool shouldLog = doc["tracker"]["shouldLog"];
-
-    if (shouldLog)
-    {
-      _shouldLog = true;
-    }
-
-    bool shouldSync = doc["tracker"]["shouldSync"];
-
-    if (shouldSync)
-    {
-      _shouldSync = true;
-    }
+    // the payload should contain the tracker info
+    JsonObject trackerObject = doc["tracker"];
+    tracker.id = trackerObject["id"].as<int>();
+    tracker.name = trackerObject["name"].as<String>();
+    tracker.description = trackerObject["description"].as<String>();
+    tracker.nestId = trackerObject["nestId"].as<int>();
+    tracker.shouldSync = trackerObject["shouldSync"].as<bool>();
+    tracker.shouldLog = trackerObject["shouldLog"].as<bool>();
   }
   else
   {
@@ -96,14 +95,4 @@ void ApiHandler::pingTrackerStatus()
 
   // Free resources
   this->_client.end();
-}
-
-bool ApiHandler::shouldStartLogging()
-{
-  return this->_shouldLog;
-}
-
-bool ApiHandler::shouldStartSyncing()
-{
-  return this->_shouldSync;
 }

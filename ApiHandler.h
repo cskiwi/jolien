@@ -13,17 +13,12 @@ public:
   ApiHandler(const char *apiKey);
   void setEndpoint(const char *server, String ssid);
   void updateTrackerStatus(const Tracker& tracker);
-  void pingTrackerStatus();
-  bool shouldStartLogging();
-  bool shouldStartSyncing();
+  void pingTrackerStatus(Tracker& tracker);
 
 private:
   const char *_apiKey;
   String _serverPath;
   HTTPClient _client;
-
-  bool _shouldSync;
-  bool _shouldLog;
 };
 
 #endif

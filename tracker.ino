@@ -18,14 +18,14 @@
 // #define SLEEP_TIME_MS (480000) //( 8 * 60 * 1000 )
 
 // // easy format 2 min
-#define RECORD_TIME_US (1 * 60 * 1000 * 1000) // ( 1 * 60 * 1000 )
+#define RECORD_TIME_US (10 * 60 * 1000 * 1000) // ( 1 * 60 * 1000 )
 // easy format 1 min
-#define SLEEP_TIME_US (1 * 60 * 1000 * 1000) //( 1 *  60* 1000 )
+#define SLEEP_TIME_US (2 * 60 * 1000 * 1000) //( 1 *  60* 1000 )
 
 const char *ssid = "tracker-hotspot";
 const char *password = "love-you";
-// const char *server = "https://gull.purr.dev"; // Server URL
-const char *server = "http://192.168.1.253:3000"; // Server URL
+const char *server = "https://gull.purr.dev"; // Server URL
+// const char *server = "http://192.168.1.253:3000"; // Server URL
 const char *apiKey = "123456789";                 // Your API key
 
 // Setup handlers
@@ -99,6 +99,9 @@ void setup()
     // set tracker info
     tracker.name = configHandler.config.ssid;
 
+    // set status else default to STATE_SETUP
+    state = configHandler.config.state;
+
     // initialize the time client
     timeClient.begin();
     timeClient.setTimeOffset(3600 * 2);
@@ -153,16 +156,16 @@ void loop()
       if (second() == 0 || initalStartup)
       {
         initalStartup = false;
-        apiHandler.pingTrackerStatus();
+        apiHandler.pingTrackerStatus(tracker);
 
         Serial.println("Checkinf if logging");
 
-        if (apiHandler.shouldStartLogging())
+        if (tracker.shouldLog)
         {
           Serial.println("Start logging");
-
-          tracker.startLog = timeClient.getEpochTime();
+          timeClient.update();
           tracker.shouldLog = false;
+          tracker.startedLogOn = timeClient.getEpochTime();
 
           Serial.println("Letting API know");
           apiHandler.updateTrackerStatus(tracker);
@@ -175,6 +178,7 @@ void loop()
           }
           Serial.println("switch states");
           state = STATE_RECORDING;
+          configHandler.config.state = STATE_RECORDING;
         }
         else
         {
@@ -185,8 +189,8 @@ void loop()
       break;
 
     case STATE_RECORDING:
-      // recordingLoop();
-      goToDeepSleep(SLEEP_TIME_MS);
+      recordingLoop();
+      // goToDeepSleep(SLEEP_TIME_US);
       break;
     case STATE_SETUP:
     default:
@@ -207,6 +211,7 @@ void loop()
   }
 }
 
+// each loop is running untill 
 void recordingLoop()
 {
   uint32_t recordingStartTime = millis();
@@ -259,19 +264,26 @@ void recordingLoop()
   cardHandler.closeFile(file);
 }
 
-void printClock(long time)
+// print the time to the serial
+void printClock(uint64_t epochTime)
 {
   // digital clock display of the time
-  Serial.print(hour(time));
-  printDigits(minute(time));
-  printDigits(second(time));
-  Serial.print(" ");
-  Serial.print(day(time));
+  Serial.print(hour(epochTime));
+  printDigits(minute(epochTime));
+  printDigits(second(epochTime));
+  Serial.print(' ');
+
+  // print date
+  Serial.print(day(epochTime));
   Serial.print(".");
-  Serial.print(month(time));
+  Serial.print(month(epochTime));
   Serial.print(".");
-  Serial.print(year(time));
-  Serial.println();
+  Serial.print(year(epochTime));
+
+  // print epoch time
+  Serial.print(" (");
+  Serial.print(epochTime);
+  Serial.println(')');
 }
 
 void printDigits(int digits)
@@ -290,7 +302,8 @@ void goToDeepSleep(uint64_t DEEP_SLEEP_TIME)
 
   // add the sleep time to the time
   long time = timeClient.getEpochTime();
-  time += DEEP_SLEEP_TIME / 1000 / 1000;
+  time += DEEP_SLEEP_TIME / 1000000;
+
   // write the time to the eeprom
   configHandler.config.time = time;
   configHandler.saveConfig();

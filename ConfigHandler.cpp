@@ -46,6 +46,11 @@ void ConfigHandler::init()
       long time = line.substring(5).toInt();
       config.time = time;
     }
+     else if (line.startsWith("state:"))
+    {
+      int state = line.substring(6).toInt();
+      config.state = state;
+    }
 
     Serial.println(line);
   }
@@ -53,6 +58,7 @@ void ConfigHandler::init()
   // Print the config
   Serial.printf("ssid:%s\r\n", config.ssid);
   Serial.printf("time:%ld\r\n", config.time);
+  Serial.printf("state:%d\r\n", config.state);
 
   // Close the file
   this->_cardHandler.closeFile(configFile);
@@ -63,12 +69,14 @@ void ConfigHandler::saveConfig()
   Serial.println("Saving config file");
   file_t configFile = this->_cardHandler.getFile(configFileName, O_WRITE | O_CREAT | O_TRUNC);
 
-  Serial.printf("ssid:%s\r\n", config.ssid);
-  Serial.printf("time:%ld\r\n", config.time);
+  // Serial.printf("ssid:%s\r\n", config.ssid);
+  // Serial.printf("time:%ld\r\n", config.time);
+  // Serial.printf("state:%d\r\n", config.state);
 
   // Write ssid and time to the file
   configFile.printf("ssid:%s\r\n", config.ssid);
   configFile.printf("time:%ld\r\n", config.time);
+  configFile.printf("state:%d\r\n", config.state);
 
   // Save the new config to the file
   this->_cardHandler.closeFile(configFile);
