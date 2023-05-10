@@ -11,27 +11,26 @@
 #include "Timer.h"
 #include <NTPClient.h>
 #include <WiFiUdp.h>
+#include "clock/printClock.h"
+#include "optimisation/cpu.h"
 
-// // easy format 2 min
-// #define RECORD_TIME_MS (120000) // ( 2 * 60 * 1000 )
-// // easy format 8 min
-// #define SLEEP_TIME_MS (480000) //( 8 * 60 * 1000 )
+// #define RECORD_TIME_US (2 * 60 * 1000 * 1000)
+// #define NO_RECORD_TIME_US (8 * 60 * 1000 * 1000)
 
-// // easy format 2 min
-#define RECORD_TIME_US (10 * 60 * 1000 * 1000) // ( 1 * 60 * 1000 )
-// easy format 1 min
-#define SLEEP_TIME_US (2 * 60 * 1000 * 1000) //( 1 *  60* 1000 )
+#define RECORD_TIME_US (2 * 60 * 1000 * 1000)
+#define NO_RECORD_TIME_US (1 * 60 * 1000 * 1000)
 
 const char *ssid = "tracker-hotspot";
 const char *password = "love-you";
-const char *server = "https://gull.purr.dev"; // Server URL
-// const char *server = "http://192.168.1.253:3000"; // Server URL
+// const char *server = "https://gull.purr.dev"; // Server URL
+const char *server = "http://192.168.1.253:3001"; // Server URL
 const char *apiKey = "123456789";                 // Your API key
+const char *trackerName = "tracker-02";           // Your tracker name
 
 // Setup handlers
 CardHandler cardHandler = CardHandler();
 SoundHandler soundHandler = SoundHandler();
-ConfigHandler configHandler = ConfigHandler(cardHandler);
+// ConfigHandler configHandler = ConfigHandler(cardHandler);
 ApiHandler apiHandler(apiKey);
 
 WiFiUDP ntpUDP;
@@ -60,47 +59,20 @@ void setup()
     ; // wait for serial port to connect. Needed for native USB port only
   }
 
-  // lower the cpu frequency to save power
-  setCpuFrequencyMhz(80);
-
-  Freq = getCpuFrequencyMhz();
-  Serial.print("CPU Freq = ");
-  Serial.print(Freq);
-  Serial.println(" MHz");
-  Freq = getXtalFrequencyMhz();
-  Serial.print("XTAL Freq = ");
-  Serial.print(Freq);
-  Serial.println(" MHz");
-  Freq = getApbFrequency();
-  Serial.print("APB Freq = ");
-  Serial.print(Freq);
-  Serial.println(" Hz");
-
-  // give some breath room for the trackers
-  delay(1000);
-  connectToWifi();
-  // disable bluetooth
-  esp_bt_controller_disable();
-
-  // Add some delay so we can see the serial output
   try
   {
+    // disable bluetooth
+    esp_bt_controller_disable();
 
-    // initialize card reader
+    // rest a bit to free up the cpu
+    delay(1000);
+
+    // setup the card reader
     cardHandler.init();
     Serial.println("Card reader initialized");
 
-    // read the config file
-    configHandler.init();
-
-    // start by setting the time from the config
-    setTime(configHandler.config.time);
-
-    // set tracker info
-    tracker.name = configHandler.config.ssid;
-
-    // set status else default to STATE_SETUP
-    state = configHandler.config.state;
+    // setup wifi
+    setupWifiConnection(ssid, password);
 
     // initialize the time client
     timeClient.begin();
@@ -110,18 +82,12 @@ void setup()
     // wait for the time to be set
     delay(1000);
 
-    // print the time
-    Serial.print("Time: ");
-    printClock(timeClient.getEpochTime());
-
-    //  save the config
-    configHandler.saveConfig();
-
     // initialize api handler
-    apiHandler.setEndpoint(server, tracker.name);
+    apiHandler.setEndpoint(server, trackerName);
 
-    // // initialize sound handler
-    // soundHandler.init();
+    // temp directly start
+    delay(1000);
+    startLogging();
   }
   catch (const std::exception &e)
   {
@@ -149,57 +115,29 @@ void loop()
   try
   {
 
-    switch (state)
+    if (state == STATE_RECORDING)
     {
-    case STATE_IDLE:
+      recordingLoop();
+    }
+    else
+    {
+
       // ping the api every minute
       if (second() == 0 || initalStartup)
       {
         initalStartup = false;
         apiHandler.pingTrackerStatus(tracker);
-
         Serial.println("Checkinf if logging");
-
         if (tracker.shouldLog)
         {
-          Serial.println("Start logging");
-          timeClient.update();
-          tracker.shouldLog = false;
-          tracker.startedLogOn = timeClient.getEpochTime();
-
-          Serial.println("Letting API know");
-          apiHandler.updateTrackerStatus(tracker);
-
-          Serial.println("disable wifi");
-          // disable wifi if enabled
-          if (WiFi.status() == WL_CONNECTED)
-          {
-            WiFi.disconnect();
-          }
-          Serial.println("switch states");
-          state = STATE_RECORDING;
-          configHandler.config.state = STATE_RECORDING;
+          startLogging();
         }
         else
         {
           Serial.println("nothing to do");
         }
       }
-
-      break;
-
-    case STATE_RECORDING:
-      recordingLoop();
-      // goToDeepSleep(SLEEP_TIME_US);
-      break;
-    case STATE_SETUP:
-    default:
-      // set state to recording
-      state = STATE_IDLE;
-      break;
     }
-
-    delay(100);
   }
   catch (const std::exception &e)
   {
@@ -209,126 +147,181 @@ void loop()
       delay(1000);
     }
   }
+  // cath all other
+  catch (...)
+  {
+    Serial.println("Unknown error");
+    while (true)
+    {
+      delay(1000);
+    }
+  }
 }
 
-// each loop is running untill 
+void startLogging()
+{
+  Serial.println("Start logging");
+  timeClient.update();
+  tracker.shouldLog = false;
+  tracker.startedLogOn = timeClient.getEpochTime();
+
+  Serial.println("Letting API know");
+  apiHandler.updateTrackerStatus(tracker);
+
+  Serial.println("disable wifi");
+  // disconnect wifi
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    WiFi.disconnect();
+  }
+
+  // turn off wifi
+  WiFi.mode(WIFI_OFF);
+
+  Serial.println("Initialize sound handler");
+  soundHandler.init();
+
+  Serial.println("switch states");
+  state = STATE_RECORDING;
+}
+
 void recordingLoop()
 {
-  uint32_t recordingStartTime = millis();
-  uint32_t recordingEndTime = recordingStartTime + RECORD_TIME_US / 1000;
-  uint32_t recordingProgress = 0;
+  while (true)
+  {
+    uint32_t recordingStartTimeMilis = millis();
+    uint32_t recordingEndTimeMilis = recordingStartTimeMilis + (RECORD_TIME_US / 1000);
+    uint32_t loopEndTimeMiliss = recordingStartTimeMilis + ((NO_RECORD_TIME_US + RECORD_TIME_US) / 1000);
+    uint32_t recordingProgress = 0;
+    uint32_t recordingProgressLast = 0;
 
-  char filename[32];
-  sprintf(filename, "/%04d-%02d-%02d_%02d-%02d-%02d.wav", year(), month(), day(), hour(), minute(), second());
+    file_t soundFile = getSoundFile();
 
-  Serial.print("Recording to file: ");
-  Serial.println(filename);
+    // Record audio samples to the file
+    while (millis() < loopEndTimeMiliss)
+    {
+      // Allocate a buffer for the samples
+      int16_t buffer[I2S_READ_LEN * I2S_NUM_CHANNELS];
 
-  file_t file = cardHandler.getFile(filename);
+      // Read samples from the I2S bus
+      size_t bytesRead;
+      i2s_read(I2S_PORT_NUM, &buffer, I2S_READ_LEN * sizeof(int16_t), &bytesRead, portMAX_DELAY);
+
+      if (millis() < recordingEndTimeMilis)
+      {
+        // Write the samples to the file
+        soundFile.write((uint8_t *)buffer, bytesRead);
+      }
+
+      // print progress every 10 seconds
+      if (millis() - recordingProgress > 10000)
+      {
+        recordingProgress = millis();
+        float dbA = 0;// code here
+        Serial.print("DbA: ");
+        Serial.println(dbA);
+        printProgress(recordingStartTimeMilis, recordingEndTimeMilis, loopEndTimeMiliss);
+      }
+    }
+
+    // Close the file
+    soundFile.close();
+
+    Serial.println("Recording done, wait a second to let the file close");
+    delay(1000);
+  }
+}
+
+file_t getSoundFile()
+{
+  unsigned long epoch = timeClient.getEpochTime();
+  // soundfile name with date and time
+  char soundFileName[50];
+  sprintf(soundFileName, "sound-%04d-%02d-%02d_%02d_%02d_%02d.wav", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch));
+  Serial.print("Recording sound to file: ");
+  Serial.println(soundFileName);
+
+  file_t soundFile;
+
+  if (!soundFile.open(soundFileName, O_APPEND | O_WRITE | O_CREAT))
+  {
+    Serial.println("Failed to open file");
+    throw std::runtime_error("Failed to open file");
+  }
+
+  Serial.println("If new file, add header");
 
   // if file size is 0, add header
-  if (file.size() == 0)
+  if (soundFile.size() == 0)
   {
     // Get the WAV header
     wav_header_t wavh = soundHandler.getWavHeader();
 
     // Write the WAV header to the file
-    file.write((uint8_t *)&wavh, sizeof(wavh));
+    soundFile.write((uint8_t *)&wavh, sizeof(wavh));
+    Serial.println("WAV header written");
   }
 
-  // Record audio samples to the file
-  while (millis() < recordingEndTime)
+  return soundFile;
+}
+
+file_t getDbAFile()
+{
+  unsigned long epoch = timeClient.getEpochTime();
+  char dbAfilename[50];
+  sprintf(dbAfilename, "soundlevels-%04d-%02d-%02d_%02d_00_00.csv", year(epoch), month(epoch), day(epoch), hour(epoch));
+  Serial.print("Recording dbA to file: ");
+  Serial.println(dbAfilename);
+
+  // initialize the dbA file if not already done
+  file_t dbAfile = cardHandler.getFile(dbAfilename, O_RDWR | O_CREAT | O_AT_END | O_APPEND | O_TRUNC);
+
+  Serial.println("Check if file is empty");
+  // if file size is 0, add header
+  if (dbAfile.size() == 0)
   {
-    // Allocate a buffer for the samples
-    int16_t buffer[I2S_READ_LEN * I2S_NUM_CHANNELS];
+    dbAfile.write("Time (s),dbA\n", 12);
 
-    size_t bytesRead = soundHandler.i2sRead(buffer, sizeof(buffer));
-
-    // Write the samples to the file
-    file.write((uint8_t *)buffer, bytesRead);
-
-    // print progress every 10 seconds
-    if (millis() - recordingProgress > 10000)
-    {
-      recordingProgress = millis();
-      Serial.print("Recording progress: ");
-      Serial.print((recordingProgress - recordingStartTime) / 1000);
-      Serial.print(" seconds");
-      // print percentage
-      Serial.print(" (");
-      Serial.print((recordingProgress - recordingStartTime) * 100 / (RECORD_TIME_US / 1000));
-      Serial.println("%)");
-    }
+    Serial.println("dbA header written");
   }
-  // Close the file
-  cardHandler.closeFile(file);
+
+  return dbAfile;
 }
 
-// print the time to the serial
-void printClock(uint64_t epochTime)
+int16_t *getAudioBuffer(const int recording_ms)
 {
-  // digital clock display of the time
-  Serial.print(hour(epochTime));
-  printDigits(minute(epochTime));
-  printDigits(second(epochTime));
-  Serial.print(' ');
+  // calculate the number of samples to read at a time
+  const int sample_size = I2S_READ_LEN;
+  // make sure sample_size is a multiple of I2S_NUM_CHANNELS
+  const int buffer_size = I2S_SAMPLE_RATE * recording_ms / 1000 * I2S_NUM_CHANNELS;
+  const int samples_remaining = buffer_size / (sample_size);
 
-  // print date
-  Serial.print(day(epochTime));
-  Serial.print(".");
-  Serial.print(month(epochTime));
-  Serial.print(".");
-  Serial.print(year(epochTime));
+  // check if there is enough space in the heap for the audio buffer
+  if (ESP.getFreeHeap() < buffer_size)
+  {
+    Serial.println("Error: not enough free heap for audio buffer");
+    Serial.print("Free heap: ");
+    Serial.println(ESP.getFreeHeap());
 
-  // print epoch time
-  Serial.print(" (");
-  Serial.print(epochTime);
-  Serial.println(')');
+    Serial.print("Required heap: ");
+    Serial.println(buffer_size);
+    return nullptr; // return null pointer to indicate failure
+  }
+
+  int16_t *audio_buffer = new int16_t[buffer_size]; // dynamically allocate memory to hold the audio data
+  size_t bytes_read;                                // declare variable to hold the number of bytes read
+  int read_offset = 0;
+
+  for (int i = 0; i < samples_remaining; i++)
+  {
+    esp_err_t result = i2s_read(I2S_PORT_NUM, audio_buffer + read_offset, I2S_READ_LEN, &bytes_read, portMAX_DELAY); // read the audio data
+    read_offset += bytes_read;                                                                                       // update the read offset based on the number of bytes read
+  }
+
+  return audio_buffer; // return the audio buffer
 }
 
-void printDigits(int digits)
-{
-  // utility function for digital clock display: prints preceding colon and leading 0
-  Serial.print(":");
-  if (digits < 10)
-    Serial.print('0');
-  Serial.print(digits);
-}
-
-// get the deep sleep time in us
-void goToDeepSleep(uint64_t DEEP_SLEEP_TIME)
-{
-  Serial.println("Going to sleep...");
-
-  // add the sleep time to the time
-  long time = timeClient.getEpochTime();
-  time += DEEP_SLEEP_TIME / 1000000;
-
-  // write the time to the eeprom
-  configHandler.config.time = time;
-  configHandler.saveConfig();
-
-  // print wake up time
-  Serial.print("Wake up time: ");
-  printClock(time);
-
-  // disconnect wifi and bt
-  WiFi.disconnect(true);
-  WiFi.mode(WIFI_OFF);
-  btStop();
-
-  adc_power_off();
-  esp_wifi_stop();
-  esp_bt_controller_disable();
-
-  // Configure the timer to wake us up!
-  esp_sleep_enable_timer_wakeup(DEEP_SLEEP_TIME);
-
-  // Go to sleep! Zzzz
-  esp_deep_sleep_start();
-}
-
-void connectToWifi()
+void setupWifiConnection(const char *ssid, const char *password)
 {
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED)
@@ -349,4 +342,65 @@ void connectToWifi()
   // print the subnet mask
   Serial.print("Subnet mask: ");
   Serial.println(WiFi.subnetMask());
+}
+
+void printSummary(uint32_t recordingStartTimeMilis, uint32_t recordingEndTimeMilis, uint32_t loopEndTimeMiliss)
+{
+  // print milis
+  Serial.print("Recording started at ");
+  Serial.println(recordingStartTimeMilis);
+
+  Serial.print("Ends at ");
+  Serial.println(recordingEndTimeMilis);
+
+  Serial.print("Loop ends at ");
+  Serial.println(loopEndTimeMiliss);
+
+  // Serial.print("Recording started at ");
+  // printClock(timeClient.getEpochTime(), true);
+
+  Serial.print("Recording for ");
+  Serial.print(RECORD_TIME_US / 1000 / 1000);
+
+  Serial.print("s, until ");
+
+  Serial.print("Then only fetching dbA for ");
+  Serial.print(NO_RECORD_TIME_US / 1000 / 1000);
+
+  Serial.println("s");
+}
+
+void printProgress(uint32_t startTime, uint32_t endTime, uint32_t loopEndTime)
+{
+  uint32_t now = millis();
+  uint32_t elapsed = now - startTime;
+  uint32_t remaining = endTime - now;
+  uint32_t loopRemaining = loopEndTime - now;
+
+  uint32_t elapsedSeconds = elapsed / 1000;
+  uint32_t remainingSeconds = remaining / 1000;
+  uint32_t loopRemainingSeconds = loopRemaining / 1000;
+
+  uint32_t progress = (elapsed * 100) / (loopEndTime - startTime);
+
+  // when the remaining time is passed only print the loop remaining time
+
+  if (endTime < now)
+  {
+    Serial.print("Loop ends in ");
+    Serial.print(loopRemainingSeconds);
+    Serial.println("s");
+  }
+  else
+  {
+    Serial.print("Recording for ");
+    Serial.print(elapsedSeconds);
+    Serial.print("s, until ");
+    Serial.print(remainingSeconds);
+    Serial.print("s remaining (");
+    Serial.print(progress);
+    Serial.print("%), loop ends in ");
+    Serial.print(loopRemainingSeconds);
+    Serial.println("s");
+  }
 }

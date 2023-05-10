@@ -42,7 +42,7 @@ class CardHandler
 public:
   CardHandler();
   void init();
-  file_t getFile(const char *filename, uint8_t oflag = O_APPEND | O_WRITE | O_CREAT);
+  file_t getFile(const char *filename, oflag_t oflag = O_APPEND | O_WRITE | O_CREAT);
   void removeFile(const char *filename);
   void closeFile(file_t file);
   bool initialized = false;

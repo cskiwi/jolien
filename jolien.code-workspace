@@ -24,7 +24,17 @@
 			"xlocmes": "cpp",
 			"xutility": "cpp",
 			"functional": "cpp",
-			"fstream": "cpp"
+			"fstream": "cpp",
+			"algorithm": "cpp",
+			"atomic": "cpp",
+			"charconv": "cpp",
+			"vector": "cpp",
+			"xhash": "cpp",
+			"xmemory": "cpp",
+			"xstring": "cpp",
+			"initializer_list": "cpp",
+			"list": "cpp",
+			"xtree": "cpp"
 		}
 	}
 }

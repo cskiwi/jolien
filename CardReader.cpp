@@ -56,28 +56,19 @@ void CardHandler::init()
   }
 }
 
-file_t CardHandler::getFile(const char *filename, uint8_t oflag)
+file_t CardHandler::getFile(const char *filename, oflag_t oflag)
 {
-#if SD_FAT_TYPE == 0
-  File file;
-#elif SD_FAT_TYPE == 1
-  File32 file;
-#elif SD_FAT_TYPE == 2
-  ExFile file;
-#elif SD_FAT_TYPE == 3
-  FsFile file;
-#else // SD_FAT_TYPE
-#error Invalid SD_FAT_TYPE
-#endif // SD_FAT_TYPE
-
-  // Open or create
+  // Serial.print("Opening file: ");
+  // Serial.println(filename);
+  
+  file_t file;
   if (!file.open(filename, oflag))
   {
-    _sd.errorHalt(&Serial, "Failed to open file for writing");
+    _sd.errorHalt(&Serial, "Failed to open file ");
     return file_t();
   }
 
-  // Return
+  // Return the file
   return file;
 }
 

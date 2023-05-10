@@ -34,12 +34,14 @@ public:
   SoundHandler();
   ~SoundHandler();
   void init();
-  void begin();
   uint8_t i2sRead(int16_t *buffer, size_t max_bytes);
   wav_header_t getWavHeader();
 
+  float getDbA(int16_t *buffer, size_t buffer_size);
+
 private:
   bool _connected;
+  bool _initialized;
 };
 
 #endif // CARD_READER_H
