@@ -5,6 +5,7 @@
     "*.tcc": "cpp",
     "xlocale": "cpp",
     "iosfwd": "cpp",
-    "xlocbuf": "cpp"
+    "xlocbuf": "cpp",
+    "istream": "cpp"
   }
 }

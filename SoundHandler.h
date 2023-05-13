@@ -7,8 +7,9 @@
 #define I2S_SCK GPIO_NUM_26
 #define I2S_PORT_NUM I2S_NUM_0
 #define I2S_SAMPLE_RATE (44100)
-#define I2S_READ_LEN (1024)
+#define I2S_READ_LEN (16 * 1024)
 #define I2S_NUM_CHANNELS (1)
+#define I2S_SAMPLE_BITS (16)
 
 // Set up the WAV header
 struct wav_header_t
@@ -34,10 +35,7 @@ public:
   SoundHandler();
   ~SoundHandler();
   void init();
-  uint8_t i2sRead(int16_t *buffer, size_t max_bytes);
-  wav_header_t getWavHeader();
-
-  float getDbA(int16_t *buffer, size_t buffer_size);
+  wav_header_t getWavHeader(uint8_t recordingTimeUs);
 
 private:
   bool _connected;

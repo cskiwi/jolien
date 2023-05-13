@@ -13,19 +13,26 @@
 #include <WiFiUdp.h>
 #include "clock/printClock.h"
 #include "optimisation/cpu.h"
+#include "arduinoFFT.h"
 
 // #define RECORD_TIME_US (2 * 60 * 1000 * 1000)
 // #define NO_RECORD_TIME_US (8 * 60 * 1000 * 1000)
 
-#define RECORD_TIME_US (2 * 60 * 1000 * 1000)
-#define NO_RECORD_TIME_US (1 * 60 * 1000 * 1000)
+#define RECORD_TIME_US (1 * 60 * 1000 * 1000)
+#define NO_RECORD_TIME_US (0.5 * 60 * 1000 * 1000)
+#define DECIBEL_UPDATE_INTERVAL_US (1 * 1000)
 
-const char *ssid = "tracker-hotspot";
-const char *password = "love-you";
+#define WRITE_SOUND_FILE false
+#define WRITE_DECIBEL_FILE false
+
+#define INSTANT_LOGGING true
+
+const char *ssid = "iPhone van Jolien";
+const char *password = "wifiJolien";
 // const char *server = "https://gull.purr.dev"; // Server URL
 const char *server = "http://192.168.1.253:3001"; // Server URL
 const char *apiKey = "123456789";                 // Your API key
-const char *trackerName = "tracker-02";           // Your tracker name
+const char *trackerName = "tracker-tst";          // Your tracker name
 
 // Setup handlers
 CardHandler cardHandler = CardHandler();
@@ -45,11 +52,8 @@ Tracker tracker = Tracker();
 #define STATE_IDLE 3
 
 int state = STATE_SETUP;
-bool pingingApi = false;
 bool initalStartup = true;
-uint32_t Freq = 0;
 
-//
 void setup()
 {
   Serial.begin(115200);
@@ -68,8 +72,13 @@ void setup()
     delay(1000);
 
     // setup the card reader
-    cardHandler.init();
-    Serial.println("Card reader initialized");
+    if (WRITE_SOUND_FILE || WRITE_DECIBEL_FILE)
+    {
+      cardHandler.init();
+    }
+    else
+
+      Serial.println("Card reader initialized");
 
     // setup wifi
     setupWifiConnection(ssid, password);
@@ -84,10 +93,6 @@ void setup()
 
     // initialize api handler
     apiHandler.setEndpoint(server, trackerName);
-
-    // temp directly start
-    delay(1000);
-    startLogging();
   }
   catch (const std::exception &e)
   {
@@ -108,6 +113,12 @@ void setup()
   Serial.println("");
   Serial.println("");
   Serial.println("");
+
+  if (INSTANT_LOGGING)
+  {
+    delay(1000);
+    startLogging();
+  }
 }
 
 void loop()
@@ -185,8 +196,30 @@ void startLogging()
   state = STATE_RECORDING;
 }
 
+void i2s_adc_data_scale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
+{
+  uint32_t j = 0;
+  uint32_t dac_value = 0;
+  for (int i = 0; i < len; i += 2)
+  {
+    dac_value = ((((uint16_t)(s_buff[i + 1] & 0xf) << 8) | ((s_buff[i + 0]))));
+    d_buff[j++] = 0;
+    d_buff[j++] = dac_value * 256 / 2048;
+  }
+}
+
 void recordingLoop()
 {
+  Serial.println("");
+  Serial.println("");
+  Serial.println("");
+  Serial.println("===================");
+  Serial.println("Start recording");
+  Serial.println("===================");
+  Serial.println("");
+  Serial.println("");
+  Serial.println("");
+
   while (true)
   {
     uint32_t recordingStartTimeMilis = millis();
@@ -194,38 +227,59 @@ void recordingLoop()
     uint32_t loopEndTimeMiliss = recordingStartTimeMilis + ((NO_RECORD_TIME_US + RECORD_TIME_US) / 1000);
     uint32_t recordingProgress = 0;
     uint32_t recordingProgressLast = 0;
+    uint32_t lastPeak = 0;
 
-    file_t soundFile = getSoundFile();
+    file_t soundFile;
+
+    if (WRITE_SOUND_FILE)
+    {
+      soundFile = getSoundFile();
+    }
 
     // Record audio samples to the file
     while (millis() < loopEndTimeMiliss)
     {
-      // Allocate a buffer for the samples
-      int16_t buffer[I2S_READ_LEN * I2S_NUM_CHANNELS];
+      int i2s_read_len = I2S_READ_LEN;
+      char *i2s_read_buff = (char *)calloc(i2s_read_len, sizeof(char));
+      uint8_t *flash_write_buff = (uint8_t *)calloc(i2s_read_len, sizeof(char));
 
       // Read samples from the I2S bus
-      size_t bytesRead;
-      i2s_read(I2S_PORT_NUM, &buffer, I2S_READ_LEN * sizeof(int16_t), &bytesRead, portMAX_DELAY);
+      size_t bytes_read;
+      i2s_read(I2S_PORT_NUM, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
+      i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, i2s_read_len);
 
-      if (millis() < recordingEndTimeMilis)
+      if (WRITE_SOUND_FILE && millis() < recordingEndTimeMilis)
       {
         // Write the samples to the file
-        soundFile.write((uint8_t *)buffer, bytesRead);
+        soundFile.write((const byte *)flash_write_buff, bytes_read);
       }
 
-      // print progress every 10 seconds
-      if (millis() - recordingProgress > 10000)
+      if ((millis() - recordingProgress) > DECIBEL_UPDATE_INTERVAL_US)
       {
         recordingProgress = millis();
-        float dbA = 0;// code here
+
+        // get highest peak
+
+        // calculate dbA
+        int dbA = 0;
+
+        // Convert RMS to dB
         Serial.print("DbA: ");
         Serial.println(dbA);
         printProgress(recordingStartTimeMilis, recordingEndTimeMilis, loopEndTimeMiliss);
       }
+
+      free(i2s_read_buff);
+      i2s_read_buff = NULL;
+      free(flash_write_buff);
+      flash_write_buff = NULL;
     }
 
-    // Close the file
-    soundFile.close();
+    if (WRITE_SOUND_FILE)
+    {
+      // Close the file
+      soundFile.close();
+    }
 
     Serial.println("Recording done, wait a second to let the file close");
     delay(1000);
@@ -255,7 +309,7 @@ file_t getSoundFile()
   if (soundFile.size() == 0)
   {
     // Get the WAV header
-    wav_header_t wavh = soundHandler.getWavHeader();
+    wav_header_t wavh = soundHandler.getWavHeader(RECORD_TIME_US);
 
     // Write the WAV header to the file
     soundFile.write((uint8_t *)&wavh, sizeof(wavh));

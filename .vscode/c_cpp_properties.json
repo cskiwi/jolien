@@ -249,6 +249,7 @@
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\HTTPClient\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\WiFiClientSecure\\src",
                 "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\NTPClient",
+                "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\arduinoFFT\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\Wire\\src",
                 "c:\\users\\glenn\\appdata\\local\\arduino15\\packages\\esp32\\tools\\xtensa-esp32-elf-gcc\\esp-2021r2-patch5-8.4.0\\xtensa-esp32-elf\\include\\c++\\8.4.0",
                 "c:\\users\\glenn\\appdata\\local\\arduino15\\packages\\esp32\\tools\\xtensa-esp32-elf-gcc\\esp-2021r2-patch5-8.4.0\\xtensa-esp32-elf\\include\\c++\\8.4.0\\xtensa-esp32-elf",
