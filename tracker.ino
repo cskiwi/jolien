@@ -4,7 +4,6 @@
 #include "esp_bt.h"
 #include "CardReader.h"
 #include "SoundHandler.h"
-#include "ConfigHandler.h"
 #include "ApiHandler.h"
 #include "Tracker.h"
 #include <WiFi.h>
@@ -15,29 +14,37 @@
 #include "optimisation/cpu.h"
 #include "arduinoFFT.h"
 
-// #define RECORD_TIME_US (2 * 60 * 1000 * 1000)
-// #define NO_RECORD_TIME_US (8 * 60 * 1000 * 1000)
+#define PROD true
+#define INSTANT_LOGGING false
 
+#if PROD
+#define RECORD_TIME_US (2 * 60 * 1000 * 1000)
+#define NO_RECORD_TIME_US (8 * 60 * 1000 * 1000)
+#define DECIBEL_UPDATE_INTERVAL_US (10 * 1000)
+#else
 #define RECORD_TIME_US (1 * 60 * 1000 * 1000)
 #define NO_RECORD_TIME_US (0.5 * 60 * 1000 * 1000)
 #define DECIBEL_UPDATE_INTERVAL_US (1 * 1000)
+#endif
 
-#define WRITE_SOUND_FILE false
-#define WRITE_DECIBEL_FILE false
-
-#define INSTANT_LOGGING true
+#define WRITE_SOUND_FILE true
+#define WRITE_DECIBEL_FILE true
 
 const char *ssid = "iPhone van Jolien";
 const char *password = "wifiJolien";
-// const char *server = "https://gull.purr.dev"; // Server URL
+
+#if PROD
+const char *server = "https://gull.purr.dev"; // Server URL
+#else
 const char *server = "http://192.168.1.253:3001"; // Server URL
-const char *apiKey = "123456789";                 // Your API key
-const char *trackerName = "tracker-tst";          // Your tracker name
+#endif
+
+const char *apiKey = "123456789";       // Your API key
+const char *trackerName = "tracker-00"; // Your tracker name
 
 // Setup handlers
 CardHandler cardHandler = CardHandler();
 SoundHandler soundHandler = SoundHandler();
-// ConfigHandler configHandler = ConfigHandler(cardHandler);
 ApiHandler apiHandler(apiKey);
 
 WiFiUDP ntpUDP;
@@ -108,7 +115,16 @@ void setup()
   Serial.println("");
   Serial.println("");
   Serial.println("===================");
-  Serial.println("Setup done");
+  Serial.println("Setup done :)");
+  Serial.println("Environment: ");
+  if (PROD)
+  {
+    Serial.println("PROD");
+  }
+  else
+  {
+    Serial.println("DEV");
+  }
   Serial.println("===================");
   Serial.println("");
   Serial.println("");
@@ -219,6 +235,7 @@ void recordingLoop()
   Serial.println("");
   Serial.println("");
   Serial.println("");
+  const float REFERENCE_SOUND_PRESSURE = 356e-6; // 20 µPa
 
   while (true)
   {
@@ -230,10 +247,16 @@ void recordingLoop()
     uint32_t lastPeak = 0;
 
     file_t soundFile;
+    file_t decibelFile;
 
     if (WRITE_SOUND_FILE)
     {
       soundFile = getSoundFile();
+    }
+
+    if (WRITE_DECIBEL_FILE)
+    {
+      decibelFile = getDBFile();
     }
 
     // Record audio samples to the file
@@ -259,19 +282,40 @@ void recordingLoop()
         recordingProgress = millis();
 
         // get highest peak
+        float highest_peak = 0;
+        for (int i = 0; i < bytes_read; i += 2)
+        {
+          int16_t sample = (int16_t)((flash_write_buff[i + 1] << 8) | flash_write_buff[i]);
+          float sample_abs = abs(sample);
+          if (sample_abs > highest_peak)
+          {
+            highest_peak = sample_abs;
+          }
+        }
 
         // calculate dbA
-        int dbA = 0;
+        float rms = sqrt(highest_peak / (bytes_read / 2));
+        float dbA = 20 * log10(rms / REFERENCE_SOUND_PRESSURE);
 
-        // Convert RMS to dB
-        Serial.print("DbA: ");
-        Serial.println(dbA);
+        if (WRITE_DECIBEL_FILE)
+        {
+          // Write the samples to the file
+          char csvLine[33];
+          unsigned long epoch = timeClient.getEpochTime();
+          sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
+          decibelFile.write((const byte *)csvLine, strlen(csvLine));
+
+          // Convert RMS to dB
+          Serial.print("DbA: ");
+          Serial.println(csvLine);
+        }
+
         printProgress(recordingStartTimeMilis, recordingEndTimeMilis, loopEndTimeMiliss);
       }
 
-      free(i2s_read_buff);
+      heap_caps_free(i2s_read_buff);
       i2s_read_buff = NULL;
-      free(flash_write_buff);
+      heap_caps_free(flash_write_buff);
       flash_write_buff = NULL;
     }
 
@@ -279,6 +323,12 @@ void recordingLoop()
     {
       // Close the file
       soundFile.close();
+    }
+
+    if (WRITE_DECIBEL_FILE)
+    {
+      // Close the file
+      decibelFile.close();
     }
 
     Serial.println("Recording done, wait a second to let the file close");
@@ -319,7 +369,7 @@ file_t getSoundFile()
   return soundFile;
 }
 
-file_t getDbAFile()
+file_t getDBFile()
 {
   unsigned long epoch = timeClient.getEpochTime();
   char dbAfilename[50];
@@ -334,7 +384,7 @@ file_t getDbAFile()
   // if file size is 0, add header
   if (dbAfile.size() == 0)
   {
-    dbAfile.write("Time (s),dbA\n", 12);
+    dbAfile.write("Time,dbA\n", 8);
 
     Serial.println("dbA header written");
   }
@@ -439,7 +489,7 @@ void printProgress(uint32_t startTime, uint32_t endTime, uint32_t loopEndTime)
 
   // when the remaining time is passed only print the loop remaining time
 
-  if (endTime < now)
+  if (endTime < now && !WRITE_SOUND_FILE)
   {
     Serial.print("Loop ends in ");
     Serial.print(loopRemainingSeconds);

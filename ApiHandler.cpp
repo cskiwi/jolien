@@ -21,6 +21,9 @@ void ApiHandler::updateTrackerStatus(const Tracker &tracker)
   Serial.print("Adding api key: ");
   Serial.println(this->_apiKey);
 
+  Serial.print("URL: ");
+  Serial.println(this->_serverPath);
+
   // Prepare payload
   DynamicJsonDocument doc(1024);
   JsonObject trackerObj = doc.createNestedObject("tracker");
@@ -30,6 +33,7 @@ void ApiHandler::updateTrackerStatus(const Tracker &tracker)
   trackerObj["shouldSync"] = tracker.shouldSync;
   String payload;
   serializeJson(doc, payload);
+
   Serial.print("Payload POST: ");
   Serial.println(payload);
 
@@ -62,6 +66,9 @@ void ApiHandler::pingTrackerStatus(Tracker &tracker)
 
   Serial.print("Adding api key: ");
   Serial.println(this->_apiKey);
+
+  Serial.print("URL: ");
+  Serial.println(this->_serverPath);
 
   // Send HTTP GET request
   int httpResponseCode = this->_client.GET();
