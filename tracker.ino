@@ -40,7 +40,7 @@ const char *server = "http://192.168.1.253:3001"; // Server URL
 #endif
 
 const char *apiKey = "123456789";       // Your API key
-const char *trackerName = "tracker-00"; // Your tracker name
+const char *trackerName = "tracker-15"; // Your tracker name
 
 // Setup handlers
 CardHandler cardHandler = CardHandler();
@@ -214,6 +214,18 @@ void startLogging()
 
 void i2s_adc_data_scale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
 {
+  if (s_buff == NULL)
+  {
+    Serial.println("Error: s_buff pointer is NULL");
+    return;
+  }
+
+  if (len % 2 != 0)
+  {
+    Serial.println("Error: len is not a multiple of 2");
+    return;
+  }
+
   uint32_t j = 0;
   uint32_t dac_value = 0;
   for (int i = 0; i < len; i += 2)
@@ -249,27 +261,30 @@ void recordingLoop()
     file_t soundFile;
     file_t decibelFile;
 
-    if (WRITE_SOUND_FILE)
+    String dbAfilename = getDBFilename();
+    String soundFileName = getSoundFilename();
+
+    if (WRITE_SOUND_FILE && !soundFile.isOpen())
     {
-      soundFile = getSoundFile();
+      Serial.println("Opening sound file");
+      soundFile = getSoundFile(soundFileName, true);
     }
 
-    if (WRITE_DECIBEL_FILE)
+    if (WRITE_DECIBEL_FILE && !decibelFile.isOpen())
     {
-      decibelFile = getDBFile();
+      Serial.println("Opening dbA file");
+      decibelFile = getDBFile(dbAfilename, true);
     }
 
     // Record audio samples to the file
     while (millis() < loopEndTimeMiliss)
     {
-      int i2s_read_len = I2S_READ_LEN;
-      char *i2s_read_buff = (char *)calloc(i2s_read_len, sizeof(char));
-      uint8_t *flash_write_buff = (uint8_t *)calloc(i2s_read_len, sizeof(char));
-
-      // Read samples from the I2S bus
+      char *i2s_read_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
+      uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(uint8_t));
       size_t bytes_read;
-      i2s_read(I2S_PORT_NUM, (void *)i2s_read_buff, i2s_read_len, &bytes_read, portMAX_DELAY);
-      i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, i2s_read_len);
+      i2s_read(I2S_PORT_NUM, (void *)i2s_read_buff, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
+      delay(100);
+      i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, I2S_READ_LEN);
 
       if (WRITE_SOUND_FILE && millis() < recordingEndTimeMilis)
       {
@@ -280,7 +295,6 @@ void recordingLoop()
       if ((millis() - recordingProgress) > DECIBEL_UPDATE_INTERVAL_US)
       {
         recordingProgress = millis();
-
         // get highest peak
         float highest_peak = 0;
         for (int i = 0; i < bytes_read; i += 2)
@@ -300,9 +314,10 @@ void recordingLoop()
         if (WRITE_DECIBEL_FILE)
         {
           // Write the samples to the file
-          char csvLine[33];
+          char csvLine[50];
           unsigned long epoch = timeClient.getEpochTime();
-          sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
+          sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f\n", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
+
           decibelFile.write((const byte *)csvLine, strlen(csvLine));
 
           // Convert RMS to dB
@@ -317,17 +332,18 @@ void recordingLoop()
       i2s_read_buff = NULL;
       heap_caps_free(flash_write_buff);
       flash_write_buff = NULL;
+
+      // freeing heap
+      delay(100);
     }
 
-    if (WRITE_SOUND_FILE)
+    if (WRITE_SOUND_FILE && soundFile.isOpen())
     {
-      // Close the file
       soundFile.close();
     }
 
-    if (WRITE_DECIBEL_FILE)
+    if (WRITE_DECIBEL_FILE && decibelFile.isOpen())
     {
-      // Close the file
       decibelFile.close();
     }
 
@@ -336,7 +352,7 @@ void recordingLoop()
   }
 }
 
-file_t getSoundFile()
+String getSoundFilename()
 {
   unsigned long epoch = timeClient.getEpochTime();
   // soundfile name with date and time
@@ -345,84 +361,89 @@ file_t getSoundFile()
   Serial.print("Recording sound to file: ");
   Serial.println(soundFileName);
 
-  file_t soundFile;
-
-  if (!soundFile.open(soundFileName, O_APPEND | O_WRITE | O_CREAT))
-  {
-    Serial.println("Failed to open file");
-    throw std::runtime_error("Failed to open file");
-  }
-
-  Serial.println("If new file, add header");
-
-  // if file size is 0, add header
-  if (soundFile.size() == 0)
-  {
-    // Get the WAV header
-    wav_header_t wavh = soundHandler.getWavHeader(RECORD_TIME_US);
-
-    // Write the WAV header to the file
-    soundFile.write((uint8_t *)&wavh, sizeof(wavh));
-    Serial.println("WAV header written");
-  }
-
-  return soundFile;
+  return String(soundFileName);
 }
 
-file_t getDBFile()
+file_t getSoundFile(const String &soundFileName, bool addHeader)
+{
+  file_t soundFile;
+
+  int retry = 0; // initialize retry count
+  while (retry < 5)
+  { // retry up to 5 times
+    if (!soundFile.open(soundFileName.c_str(), O_APPEND | O_WRITE | O_CREAT))
+    {
+      Serial.println("Failed to open file");
+      retry++;
+      delay(1000); // wait for 1 second before retrying
+    }
+    else
+    {
+      if (addHeader)
+      {
+        Serial.println("If new file, add header");
+
+        // if file size is 0, add header
+        if (soundFile.size() == 0)
+        {
+          // Get the WAV header
+          wav_header_t wavh = soundHandler.getWavHeader(RECORD_TIME_US);
+
+          // Write the WAV header to the file
+          soundFile.write((uint8_t *)&wavh, sizeof(wavh));
+          Serial.println("WAV header written");
+        }
+      }
+
+      return soundFile;
+    }
+  }
+
+  throw std::runtime_error("Failed to open file after 5 retries"); // throw an error if all retries failed
+}
+
+String getDBFilename()
 {
   unsigned long epoch = timeClient.getEpochTime();
   char dbAfilename[50];
   sprintf(dbAfilename, "soundlevels-%04d-%02d-%02d_%02d_00_00.csv", year(epoch), month(epoch), day(epoch), hour(epoch));
   Serial.print("Recording dbA to file: ");
   Serial.println(dbAfilename);
-
-  // initialize the dbA file if not already done
-  file_t dbAfile = cardHandler.getFile(dbAfilename, O_RDWR | O_CREAT | O_AT_END | O_APPEND | O_TRUNC);
-
-  Serial.println("Check if file is empty");
-  // if file size is 0, add header
-  if (dbAfile.size() == 0)
-  {
-    dbAfile.write("Time,dbA\n", 8);
-
-    Serial.println("dbA header written");
-  }
-
-  return dbAfile;
+  return String(dbAfilename);
 }
 
-int16_t *getAudioBuffer(const int recording_ms)
+file_t getDBFile(const String &dbAfilename, bool addHeader)
 {
-  // calculate the number of samples to read at a time
-  const int sample_size = I2S_READ_LEN;
-  // make sure sample_size is a multiple of I2S_NUM_CHANNELS
-  const int buffer_size = I2S_SAMPLE_RATE * recording_ms / 1000 * I2S_NUM_CHANNELS;
-  const int samples_remaining = buffer_size / (sample_size);
+  file_t dbAfile;
 
-  // check if there is enough space in the heap for the audio buffer
-  if (ESP.getFreeHeap() < buffer_size)
-  {
-    Serial.println("Error: not enough free heap for audio buffer");
-    Serial.print("Free heap: ");
-    Serial.println(ESP.getFreeHeap());
-
-    Serial.print("Required heap: ");
-    Serial.println(buffer_size);
-    return nullptr; // return null pointer to indicate failure
+  int retry = 0; // initialize retry count
+  while (retry < 5)
+  { // retry up to 5 times
+    dbAfile = cardHandler.getFile(dbAfilename.c_str(), O_APPEND | O_WRITE | O_CREAT);
+    if (!dbAfile.isOpen())
+    {
+      Serial.println("Failed to create file");
+      retry++;
+      delay(1000); // wait for 1 second before retrying
+    }
+    else
+    {
+      if (addHeader)
+      {
+        Serial.println("If new file, add header");
+        Serial.println("Check if file is empty");
+        // if file size is 0, add header
+        if (dbAfile.size() == 0)
+        {
+          dbAfile.write("Time,dbA\n", 8);
+          Serial.println("dbA header written");
+        }
+        return dbAfile;
+      }
+    }
   }
 
-  int16_t *audio_buffer = new int16_t[buffer_size]; // dynamically allocate memory to hold the audio data
-  size_t bytes_read;                                // declare variable to hold the number of bytes read
-  int read_offset = 0;
-
-  for (int i = 0; i < samples_remaining; i++)
-  {
-    esp_err_t result = i2s_read(I2S_PORT_NUM, audio_buffer + read_offset, I2S_READ_LEN, &bytes_read, portMAX_DELAY); // read the audio data
-    read_offset += bytes_read;                                                                                       // update the read offset based on the number of bytes read
-  }
-
-  return audio_buffer; // return the audio buffer
+  throw std::runtime_error("Failed to create file after 5 retries"); // throw an error if all retries failed
 }
 
 void setupWifiConnection(const char *ssid, const char *password)
@@ -448,32 +469,6 @@ void setupWifiConnection(const char *ssid, const char *password)
   Serial.println(WiFi.subnetMask());
 }
 
-void printSummary(uint32_t recordingStartTimeMilis, uint32_t recordingEndTimeMilis, uint32_t loopEndTimeMiliss)
-{
-  // print milis
-  Serial.print("Recording started at ");
-  Serial.println(recordingStartTimeMilis);
-
-  Serial.print("Ends at ");
-  Serial.println(recordingEndTimeMilis);
-
-  Serial.print("Loop ends at ");
-  Serial.println(loopEndTimeMiliss);
-
-  // Serial.print("Recording started at ");
-  // printClock(timeClient.getEpochTime(), true);
-
-  Serial.print("Recording for ");
-  Serial.print(RECORD_TIME_US / 1000 / 1000);
-
-  Serial.print("s, until ");
-
-  Serial.print("Then only fetching dbA for ");
-  Serial.print(NO_RECORD_TIME_US / 1000 / 1000);
-
-  Serial.println("s");
-}
-
 void printProgress(uint32_t startTime, uint32_t endTime, uint32_t loopEndTime)
 {
   uint32_t now = millis();
@@ -489,7 +484,7 @@ void printProgress(uint32_t startTime, uint32_t endTime, uint32_t loopEndTime)
 
   // when the remaining time is passed only print the loop remaining time
 
-  if (endTime < now && !WRITE_SOUND_FILE)
+  if (endTime < now || !WRITE_SOUND_FILE)
   {
     Serial.print("Loop ends in ");
     Serial.print(loopRemainingSeconds);
