@@ -34,7 +34,8 @@
 			"xstring": "cpp",
 			"initializer_list": "cpp",
 			"list": "cpp",
-			"xtree": "cpp"
+			"xtree": "cpp",
+			"cmath": "cpp"
 		}
 	}
 }

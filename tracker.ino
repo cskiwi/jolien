@@ -29,6 +29,13 @@
 
 #define WRITE_SOUND_FILE true
 #define WRITE_DECIBEL_FILE true
+#define GAIN_FACTOR 3.0
+
+#define BLINK_INTERVAL 500
+#define STOP_BLINK 5
+#define LED_1 LED_BUILTIN
+
+#define CONNECTION_TIMEOUT 10
 
 const char *ssid = "iPhone van Jolien";
 const char *password = "wifiJolien";
@@ -40,7 +47,7 @@ const char *server = "http://192.168.1.253:3001"; // Server URL
 #endif
 
 const char *apiKey = "123456789";       // Your API key
-const char *trackerName = "tracker-15"; // Your tracker name
+const char *trackerName = "tracker-00"; // Your tracker name
 
 // Setup handlers
 CardHandler cardHandler = CardHandler();
@@ -60,9 +67,24 @@ Tracker tracker = Tracker();
 
 int state = STATE_SETUP;
 bool initalStartup = true;
+int retryCounter = 0;
+int blinkAmount = 0;
+
+void blinkLed(int times, uint8_t pin = LED_1)
+{
+  for (int i = 0; i < times; i++)
+  {
+    digitalWrite(pin, HIGH);
+    delay(BLINK_INTERVAL);
+    digitalWrite(pin, LOW);
+    delay(BLINK_INTERVAL);
+  }
+}
 
 void setup()
 {
+  pinMode(LED_1, OUTPUT);
+
   Serial.begin(115200);
 
   while (!Serial)
@@ -90,6 +112,9 @@ void setup()
     // setup wifi
     setupWifiConnection(ssid, password);
 
+    // blink led once
+    blinkLed(2);
+
     // initialize the time client
     timeClient.begin();
     timeClient.setTimeOffset(3600 * 2);
@@ -104,8 +129,22 @@ void setup()
   catch (const std::exception &e)
   {
     Serial.println(e.what());
+
+    retryCounter++;
+
+    if (retryCounter < 5)
+    {
+      // wait a bit and try again
+      delay(1000);
+      ESP.restart();
+    }
+
     while (true)
     {
+      // if it keeps failing, just stop
+      // set the led to high to indicate something is wrong
+      digitalWrite(LED_BUILTIN, HIGH);
+
       delay(1000);
     }
   }
@@ -149,9 +188,10 @@ void loop()
     else
     {
 
-      // ping the api every minute
-      if (second() == 0 || initalStartup)
+      // ping the api every 10 seconds
+      if (second() % 10 == 0 || initalStartup)
       {
+        blinkLed(1);
         initalStartup = false;
         apiHandler.pingTrackerStatus(tracker);
         Serial.println("Checkinf if logging");
@@ -226,14 +266,25 @@ void i2s_adc_data_scale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
     return;
   }
 
-  uint32_t j = 0;
-  uint32_t dac_value = 0;
-  for (int i = 0; i < len; i += 2)
+  float gain = GAIN_FACTOR;
+
+  for (uint32_t i = 0; i < len; i += sizeof(int32_t))
   {
-    dac_value = ((((uint16_t)(s_buff[i + 1] & 0xf) << 8) | ((s_buff[i + 0]))));
-    d_buff[j++] = 0;
-    d_buff[j++] = dac_value * 256 / 2048;
+    int32_t sample = *((int32_t *)(s_buff + i));
+    sample = (int32_t)(sample * gain);
+    *((int32_t *)(d_buff + i)) = sample;
   }
+
+  // old code
+
+  // uint32_t j = 0;
+  // uint32_t dac_value = 0;
+  // for (int i = 0; i < len; i += 2)
+  // {
+  //   dac_value = ((((uint16_t)(s_buff[i + 1] & 0xf) << 8) | ((s_buff[i + 0]))));
+  //   d_buff[j++] = 0;
+  //   d_buff[j++] = dac_value * 256 / 1024;
+  // }
 }
 
 void recordingLoop()
@@ -261,39 +312,56 @@ void recordingLoop()
     file_t soundFile;
     file_t decibelFile;
 
+    // get filenames
     String dbAfilename = getDBFilename();
+    delay(100);
+
     String soundFileName = getSoundFilename();
+    delay(100);
 
     if (WRITE_SOUND_FILE && !soundFile.isOpen())
     {
       Serial.println("Opening sound file");
       soundFile = getSoundFile(soundFileName, true);
+      delay(100);
     }
 
     if (WRITE_DECIBEL_FILE && !decibelFile.isOpen())
     {
       Serial.println("Opening dbA file");
       decibelFile = getDBFile(dbAfilename, true);
+      delay(100);
     }
+
+    Serial.println("Start recording");
+
+    // blikn led 3 times to indicate recording on a different thread
+    blinkLed(3);
+
+    char *i2s_read_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
+    uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(char));
+    size_t bytes_read;
 
     // Record audio samples to the file
     while (millis() < loopEndTimeMiliss)
     {
-      char *i2s_read_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
-      uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(uint8_t));
-      size_t bytes_read;
       i2s_read(I2S_PORT_NUM, (void *)i2s_read_buff, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
-      delay(100);
+
+      // Serial.println("Scaling data...");
       i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, I2S_READ_LEN);
+      // Serial.println("Data scaled");
 
       if (WRITE_SOUND_FILE && millis() < recordingEndTimeMilis)
       {
         // Write the samples to the file
+        // Serial.println("Writing data to file...");
         soundFile.write((const byte *)flash_write_buff, bytes_read);
+        // Serial.println("Data written");
       }
 
-      if ((millis() - recordingProgress) > DECIBEL_UPDATE_INTERVAL_US)
+      if (WRITE_DECIBEL_FILE && (millis() - recordingProgress) > DECIBEL_UPDATE_INTERVAL_US)
       {
+        // Serial.println("Calculating dbA...");
         recordingProgress = millis();
         // get highest peak
         float highest_peak = 0;
@@ -311,31 +379,42 @@ void recordingLoop()
         float rms = sqrt(highest_peak / (bytes_read / 2));
         float dbA = 20 * log10(rms / REFERENCE_SOUND_PRESSURE);
 
-        if (WRITE_DECIBEL_FILE)
-        {
-          // Write the samples to the file
-          char csvLine[50];
-          unsigned long epoch = timeClient.getEpochTime();
-          sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f\n", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
+        Serial.print("Writing dbA to file... ");
+        // Write the samples to the file
+        char csvLine[50];
+        unsigned long epoch = timeClient.getEpochTime();
+        sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f\n", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
 
-          decibelFile.write((const byte *)csvLine, strlen(csvLine));
+        decibelFile.write((const byte *)csvLine, strlen(csvLine));
 
-          // Convert RMS to dB
-          Serial.print("DbA: ");
-          Serial.println(csvLine);
-        }
-
-        printProgress(recordingStartTimeMilis, recordingEndTimeMilis, loopEndTimeMiliss);
+        // Convert RMS to dB
+        Serial.print("DbA: ");
+        Serial.println(csvLine);
       }
 
-      heap_caps_free(i2s_read_buff);
-      i2s_read_buff = NULL;
-      heap_caps_free(flash_write_buff);
-      flash_write_buff = NULL;
+      // print progress every 5 seconds
+      if (millis() - recordingProgressLast > 5000)
+      {
+        printProgress(recordingStartTimeMilis, recordingEndTimeMilis, loopEndTimeMiliss);
+        recordingProgressLast = millis();
 
-      // freeing heap
-      delay(100);
+        if (blinkAmount < STOP_BLINK)
+        {
+          // blink led to indicate recording
+          blinkLed(1);
+
+          blinkAmount++;
+        }
+      }
     }
+
+    // freeing heap
+    free(i2s_read_buff);
+    i2s_read_buff = NULL;
+    free(flash_write_buff);
+    flash_write_buff = NULL;
+
+    delay(100);
 
     if (WRITE_SOUND_FILE && soundFile.isOpen())
     {
@@ -347,7 +426,15 @@ void recordingLoop()
       decibelFile.close();
     }
 
+    Serial.println("");
+    Serial.println("");
+    Serial.println("");
+    Serial.println("===================");
     Serial.println("Recording done, wait a second to let the file close");
+    Serial.println("===================");
+    Serial.println("");
+    Serial.println("");
+    Serial.println("");
     delay(1000);
   }
 }
@@ -448,11 +535,48 @@ file_t getDBFile(const String &dbAfilename, bool addHeader)
 
 void setupWifiConnection(const char *ssid, const char *password)
 {
+  int timeout_counter = 0;
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
+  wl_status_t wifi_status = WiFi.status();
+  while (wifi_status != WL_CONNECTED)
   {
+    switch (WiFi.status())
+    {
+    case WL_NO_SHIELD:
+      Serial.println("No WiFi shield is present.");
+      break;
+    case WL_IDLE_STATUS:
+      Serial.println("Attempting to connect...");
+      break;
+    case WL_NO_SSID_AVAIL:
+      Serial.println("No SSID available.");
+      break;
+    case WL_SCAN_COMPLETED:
+      Serial.println("Scan Networks is complete.");
+      break;
+    case WL_CONNECT_FAILED:
+      Serial.println("Connection FAILED.");
+      break;
+    case WL_CONNECTION_LOST:
+      Serial.println("Connection LOST.");
+      break;
+    case WL_DISCONNECTED:
+      Serial.println("Device has been DISCONNECTED from the Network.");
+      break;
+    default:
+      Serial.println("UNKNOWN ERROR");
+      break;
+    }
+
     delay(1000);
     Serial.println("Connecting to WiFi...");
+    timeout_counter++;
+    if (timeout_counter >= CONNECTION_TIMEOUT)
+    {
+      ESP.restart();
+    }
+
+    wifi_status = WiFi.status();
   }
   Serial.println("Connected to WiFi");
 
@@ -492,14 +616,15 @@ void printProgress(uint32_t startTime, uint32_t endTime, uint32_t loopEndTime)
   }
   else
   {
-    Serial.print("Recording for ");
+    Serial.print("We have been recording for ");
     Serial.print(elapsedSeconds);
-    Serial.print("s, until ");
+    Serial.print("s, ");
     Serial.print(remainingSeconds);
-    Serial.print("s remaining (");
-    Serial.print(progress);
-    Serial.print("%), loop ends in ");
+    Serial.print("s remaining, loop ends in ");
     Serial.print(loopRemainingSeconds);
-    Serial.println("s");
+    Serial.print("s");
+    Serial.print(", progress: ");
+    Serial.print(progress);
+    Serial.println("%");
   }
 }
