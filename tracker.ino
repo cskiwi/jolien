@@ -27,7 +27,7 @@
 #define DECIBEL_UPDATE_INTERVAL_US (1 * 1000)
 #endif
 
-#define WRITE_SOUND_FILE true
+#define WRITE_SOUND_FILE false
 #define WRITE_DECIBEL_FILE true
 #define GAIN_FACTOR 3.0
 
@@ -298,27 +298,16 @@ void recordingLoop()
     uint32_t recordingProgressLast = 0;
     uint32_t lastPeak = 0;
 
+    String dbAData = "";
+
     file_t soundFile;
-    file_t decibelFile;
-
-    // get filenames
-    String dbAfilename = getDBFilename();
-    delay(100);
-
-    String soundFileName = getSoundFilename();
-    delay(100);
 
     if (WRITE_SOUND_FILE && !soundFile.isOpen())
     {
-      Serial.println("Opening sound file");
+      String soundFileName = getSoundFilename();
+      Serial.print("Opening sound file: ");
+      Serial.println(soundFileName);
       soundFile = getSoundFile(soundFileName, true);
-      delay(100);
-    }
-
-    if (WRITE_DECIBEL_FILE && !decibelFile.isOpen())
-    {
-      Serial.println("Opening dbA file");
-      decibelFile = getDBFile(dbAfilename, true);
       delay(100);
     }
 
@@ -374,22 +363,15 @@ void recordingLoop()
         float rms = sqrt(highest_peak / (bytes_read / 2));
         float dbA = 20 * log10(rms / REFERENCE_SOUND_PRESSURE);
 
-        Serial.print("Writing dbA to file... ");
         // Write the samples to the file
         char csvLine[50];
         unsigned long epoch = timeClient.getEpochTime();
         sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f\n", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
 
-        if (!decibelFile.isWritable())
-        {
-          Serial.println("Dba File is not writable??");
-        }
+        dbAData += csvLine;
 
-        decibelFile.write((const byte *)csvLine, strlen(csvLine));
-
-        // Convert RMS to dB
         Serial.print("DbA: ");
-        Serial.println(csvLine);
+        Serial.print(csvLine);
       }
 
       // print progress every 5 seconds
@@ -414,8 +396,18 @@ void recordingLoop()
       soundFile.close();
     }
 
-    if (WRITE_DECIBEL_FILE && decibelFile.isOpen())
+    if (WRITE_DECIBEL_FILE)
     {
+      // get filename
+      String dbAfilename = getDBFilename();
+
+      // log that what file we are writing to
+      Serial.print("Writing dbA data to file: ");
+      Serial.println(dbAfilename);
+      file_t decibelFile = getDBFile(dbAfilename, true);
+
+      decibelFile.write((const byte *)dbAData.c_str(), dbAData.length());
+
       Serial.println("Closing dbA file");
       decibelFile.close();
     }
@@ -445,9 +437,6 @@ String getSoundFilename()
   // soundfile name with date and time
   char soundFileName[50];
   sprintf(soundFileName, "sound-%04d-%02d-%02d_%02d_%02d_%02d.wav", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch));
-  Serial.print("Recording sound to file: ");
-  Serial.println(soundFileName);
-
   return String(soundFileName);
 }
 
@@ -494,8 +483,6 @@ String getDBFilename()
   unsigned long epoch = timeClient.getEpochTime();
   char dbAfilename[50];
   sprintf(dbAfilename, "soundlevels-%04d-%02d-%02d_%02d_00_00.csv", year(epoch), month(epoch), day(epoch), hour(epoch));
-  Serial.print("Recording dbA to file: ");
-  Serial.println(dbAfilename);
   return String(dbAfilename);
 }
 
