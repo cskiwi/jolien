@@ -316,15 +316,14 @@ void recordingLoop()
     // blink led 3 times to indicate recording on a different thread
     blinkLed(3);
 
-    char *i2s_read_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
-    uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(char));
+    char *audio_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
     size_t bytes_read;
 
     // Record audio samples to the file
     while (millis() < loopEndTimeMiliss)
     {
-      i2s_read(I2S_PORT_NUM, (void *)i2s_read_buff, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
-      i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, I2S_READ_LEN);
+      i2s_read(I2S_PORT_NUM, (void *)audio_buff, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
+      i2s_adc_data_scale((uint8_t *)audio_buff, (uint8_t *)audio_buff, I2S_READ_LEN);
 
       if (WRITE_SOUND_FILE && millis() < recordingEndTimeMilis)
       {
@@ -332,7 +331,7 @@ void recordingLoop()
         {
           Serial.println("Sound file is not writable??");
         }
-        soundFile.write((const byte *)flash_write_buff, bytes_read);
+        soundFile.write((const byte *)audio_buff, bytes_read);
       }
 
       if (WRITE_DECIBEL_FILE && (millis() - recordingProgress) > DECIBEL_UPDATE_INTERVAL_US)
@@ -343,7 +342,7 @@ void recordingLoop()
         float highest_peak = 0;
         for (int i = 0; i < bytes_read; i += 2)
         {
-          int16_t sample = (int16_t)((flash_write_buff[i + 1] << 8) | flash_write_buff[i]);
+          int16_t sample = (int16_t)((audio_buff[i + 1] << 8) | audio_buff[i]);
           float sample_abs = abs(sample);
           if (sample_abs > highest_peak)
           {
@@ -405,10 +404,8 @@ void recordingLoop()
     }
 
     // freeing heap
-    free(i2s_read_buff);
-    i2s_read_buff = NULL;
-    free(flash_write_buff);
-    flash_write_buff = NULL;
+    free(audio_buff);
+    audio_buff = NULL;
 
     Serial.println("");
     Serial.println("");
