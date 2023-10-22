@@ -19,8 +19,7 @@
                 "UNICODE",
                 "USBCON",
                 "_UNICODE"
-            ],
-            "compileCommands": "${workspaceFolder}/build/compile_commands.json"
+            ]
         },
         {
             "name": "Arduino",
@@ -243,7 +242,7 @@
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\FS\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\SD\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\SPI\\src",
-                "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\SdFat_-_Adafruit_Fork\\src",
+                "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\SdFat\\src",
                 "C:\\Users\\glenn\\Documents\\Arduino\\libraries\\ArduinoJson\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\WiFi\\src",
                 "C:\\Users\\glenn\\AppData\\Local\\Arduino15\\packages\\esp32\\hardware\\esp32\\2.0.7\\libraries\\HTTPClient\\src",

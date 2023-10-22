@@ -35,7 +35,10 @@
 			"initializer_list": "cpp",
 			"list": "cpp",
 			"xtree": "cpp",
-			"cmath": "cpp"
+			"cmath": "cpp",
+			"sstream": "cpp",
+			"xiosbase": "cpp",
+			"cstddef": "cpp"
 		}
 	}
 }

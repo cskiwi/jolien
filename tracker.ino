@@ -14,7 +14,7 @@
 #include "optimisation/cpu.h"
 #include "arduinoFFT.h"
 
-#define PROD true
+#define PROD false
 #define INSTANT_LOGGING false
 
 #if PROD
@@ -274,17 +274,6 @@ void i2s_adc_data_scale(uint8_t *d_buff, uint8_t *s_buff, uint32_t len)
     sample = (int32_t)(sample * gain);
     *((int32_t *)(d_buff + i)) = sample;
   }
-
-  // old code
-
-  // uint32_t j = 0;
-  // uint32_t dac_value = 0;
-  // for (int i = 0; i < len; i += 2)
-  // {
-  //   dac_value = ((((uint16_t)(s_buff[i + 1] & 0xf) << 8) | ((s_buff[i + 0]))));
-  //   d_buff[j++] = 0;
-  //   d_buff[j++] = dac_value * 256 / 1024;
-  // }
 }
 
 void recordingLoop()
@@ -335,11 +324,11 @@ void recordingLoop()
 
     Serial.println("Start recording");
 
-    // blikn led 3 times to indicate recording on a different thread
+    // blink led 3 times to indicate recording on a different thread
     blinkLed(3);
 
     char *i2s_read_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
-    uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(char));
+uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(char));
     size_t bytes_read;
 
     // Record audio samples to the file
@@ -350,9 +339,15 @@ void recordingLoop()
       // Serial.println("Scaling data...");
       i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, I2S_READ_LEN);
       // Serial.println("Data scaled");
+      // Write the scaled audio samples to flash memory here
 
       if (WRITE_SOUND_FILE && millis() < recordingEndTimeMilis)
       {
+        if (!soundFile.isWritable())
+        {
+          Serial.println("Sound file is not writable??");
+        }
+
         // Write the samples to the file
         // Serial.println("Writing data to file...");
         soundFile.write((const byte *)flash_write_buff, bytes_read);
@@ -385,6 +380,11 @@ void recordingLoop()
         unsigned long epoch = timeClient.getEpochTime();
         sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f\n", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
 
+        if (!decibelFile.isWritable())
+        {
+          Serial.println("Dba File is not writable??");
+        }
+
         decibelFile.write((const byte *)csvLine, strlen(csvLine));
 
         // Convert RMS to dB
@@ -408,23 +408,21 @@ void recordingLoop()
       }
     }
 
-    // freeing heap
-    free(i2s_read_buff);
-    i2s_read_buff = NULL;
-    free(flash_write_buff);
-    flash_write_buff = NULL;
-
-    delay(100);
-
     if (WRITE_SOUND_FILE && soundFile.isOpen())
     {
+      Serial.println("Closing sound file");
       soundFile.close();
     }
 
     if (WRITE_DECIBEL_FILE && decibelFile.isOpen())
     {
+      Serial.println("Closing dbA file");
       decibelFile.close();
     }
+
+    // freeing heap
+    free(i2s_buff);
+    i2s_buff = NULL;
 
     Serial.println("");
     Serial.println("");
@@ -460,7 +458,7 @@ file_t getSoundFile(const String &soundFileName, bool addHeader)
   { // retry up to 5 times
     if (!soundFile.open(soundFileName.c_str(), O_APPEND | O_WRITE | O_CREAT))
     {
-      Serial.println("Failed to open file");
+      Serial.println("Failed to open sound file");
       retry++;
       delay(1000); // wait for 1 second before retrying
     }
@@ -506,10 +504,9 @@ file_t getDBFile(const String &dbAfilename, bool addHeader)
   int retry = 0; // initialize retry count
   while (retry < 5)
   { // retry up to 5 times
-    dbAfile = cardHandler.getFile(dbAfilename.c_str(), O_APPEND | O_WRITE | O_CREAT);
-    if (!dbAfile.isOpen())
+    if (!dbAfile.open(dbAfilename.c_str(), O_APPEND | O_WRITE | O_CREAT))
     {
-      Serial.println("Failed to create file");
+      Serial.println("Failed to dbA file");
       retry++;
       delay(1000); // wait for 1 second before retrying
     }
@@ -517,13 +514,14 @@ file_t getDBFile(const String &dbAfilename, bool addHeader)
     {
       if (addHeader)
       {
-        Serial.println("If new file, add header");
+        delay(1000); // wait for 1 second before retrying
         Serial.println("Check if file is empty");
         // if file size is 0, add header
         if (dbAfile.size() == 0)
         {
-          dbAfile.write("Time,dbA\n", 8);
-          Serial.println("dbA header written");
+          Serial.println("Adding header");
+          String headerLine = "Time,dbA\n";
+          dbAfile.write((const byte *)headerLine, strlen(headerLine));
         }
         return dbAfile;
       }
