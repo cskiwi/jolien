@@ -27,7 +27,7 @@
 #define DECIBEL_UPDATE_INTERVAL_US (1 * 1000)
 #endif
 
-#define WRITE_SOUND_FILE false
+#define WRITE_SOUND_FILE true
 #define WRITE_DECIBEL_FILE true
 #define GAIN_FACTOR 3.0
 
@@ -324,11 +324,7 @@ void recordingLoop()
     while (millis() < loopEndTimeMiliss)
     {
       i2s_read(I2S_PORT_NUM, (void *)i2s_read_buff, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
-
-      // Serial.println("Scaling data...");
       i2s_adc_data_scale(flash_write_buff, (uint8_t *)i2s_read_buff, I2S_READ_LEN);
-      // Serial.println("Data scaled");
-      // Write the scaled audio samples to flash memory here
 
       if (WRITE_SOUND_FILE && millis() < recordingEndTimeMilis)
       {
@@ -336,11 +332,7 @@ void recordingLoop()
         {
           Serial.println("Sound file is not writable??");
         }
-
-        // Write the samples to the file
-        // Serial.println("Writing data to file...");
         soundFile.write((const byte *)flash_write_buff, bytes_read);
-        // Serial.println("Data written");
       }
 
       if (WRITE_DECIBEL_FILE && (millis() - recordingProgress) > DECIBEL_UPDATE_INTERVAL_US)
