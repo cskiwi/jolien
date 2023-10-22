@@ -38,7 +38,9 @@
 			"cmath": "cpp",
 			"sstream": "cpp",
 			"xiosbase": "cpp",
-			"cstddef": "cpp"
+			"cstddef": "cpp",
+			"xlocinfo": "cpp",
+			"string": "cpp"
 		}
 	}
 }

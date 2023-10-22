@@ -522,8 +522,8 @@ file_t getDBFile(const String &dbAfilename, bool addHeader)
         if (dbAfile.size() == 0)
         {
           Serial.println("Adding header");
-          String headerLine = "Time,dbA\n";
-          dbAfile.write((const byte *)headerLine, strlen(headerLine));
+          String dbHeader = "Time,dbA\n";
+          dbAfile.write((const byte *)dbHeader.c_str(), dbHeader.length());
         }
         return dbAfile;
       }
