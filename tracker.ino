@@ -328,7 +328,7 @@ void recordingLoop()
     blinkLed(3);
 
     char *i2s_read_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
-uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(char));
+    uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(char));
     size_t bytes_read;
 
     // Record audio samples to the file
@@ -421,8 +421,10 @@ uint8_t *flash_write_buff = (uint8_t *)calloc(I2S_READ_LEN, sizeof(char));
     }
 
     // freeing heap
-    free(i2s_buff);
-    i2s_buff = NULL;
+    free(i2s_read_buff);
+    i2s_read_buff = NULL;
+    free(flash_write_buff);
+    flash_write_buff = NULL;
 
     Serial.println("");
     Serial.println("");
