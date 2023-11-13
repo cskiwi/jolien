@@ -14,8 +14,9 @@
 #include "optimisation/cpu.h"
 #include "arduinoFFT.h"
 
-#define PROD false
+#define PROD true
 #define INSTANT_LOGGING false
+#define INSTANT_LISTING false
 
 #if PROD
 #define RECORD_TIME_US (2 * 60 * 1000 * 1000)
@@ -46,7 +47,7 @@ const char *server = "https://gull.purr.dev"; // Server URL
 const char *server = "http://192.168.1.253:3001"; // Server URL
 #endif
 
-const char *apiKey = "123456789";       // Your API key
+const char *apiKey = "<>";       // Your API key
 const char *trackerName = "tracker-00"; // Your tracker name
 
 // Setup handlers
@@ -62,8 +63,7 @@ Tracker tracker = Tracker();
 
 // depending on the state activate the bleutooth for the app or run in recording mode
 #define STATE_SETUP 0
-#define STATE_RECORDING 2
-#define STATE_IDLE 3
+#define STATE_RECORDING 1
 
 int state = STATE_SETUP;
 bool initalStartup = true;
@@ -169,10 +169,19 @@ void setup()
   Serial.println("");
   Serial.println("");
 
+  Serial.print("INSTANT_LOGGING: ");
+  Serial.println(INSTANT_LOGGING);
+  Serial.print("INSTANT_LISTING: ");
+  Serial.println(INSTANT_LISTING);
+
   if (INSTANT_LOGGING)
   {
     delay(1000);
     startLogging();
+  }
+  else if (INSTANT_LISTING)
+  {
+    uploadData();
   }
 }
 
@@ -223,6 +232,35 @@ void loop()
       delay(1000);
     }
   }
+}
+
+void printFiles(File dir, int numTabs)
+{
+  while (true)
+  {
+    File entry = dir.openNextFile();
+    if (!entry)
+    {
+      break;
+    }
+    for (uint8_t i = 0; i < numTabs; i++)
+    {
+      Serial.print('\t');
+    }
+    Serial.println(entry.name());
+    entry.close();
+  }
+}
+
+void uploadData()
+{
+  Serial.println("Listing files");
+
+  File dir = SD.open("/");
+  printFiles(dir, 0);
+  dir.close();
+
+  Serial.println("Uploading files");
 }
 
 void startLogging()
@@ -296,20 +334,11 @@ void recordingLoop()
     uint32_t loopEndTimeMiliss = recordingStartTimeMilis + ((NO_RECORD_TIME_US + RECORD_TIME_US) / 1000);
     uint32_t recordingProgress = 0;
     uint32_t recordingProgressLast = 0;
-    uint32_t lastPeak = 0;
 
-    String dbAData = "";
-
-    file_t soundFile;
-
-    if (WRITE_SOUND_FILE && !soundFile.isOpen())
-    {
-      String soundFileName = getSoundFilename();
-      Serial.print("Opening sound file: ");
-      Serial.println(soundFileName);
-      soundFile = getSoundFile(soundFileName, true);
-      delay(100);
-    }
+    // data
+    String dbA_data = "";
+    // get filename
+    String soundFileName = getSoundFilename();
 
     Serial.println("Start recording");
 
@@ -318,20 +347,22 @@ void recordingLoop()
 
     char *audio_buff = (char *)calloc(I2S_READ_LEN, sizeof(char));
     size_t bytes_read;
-
-    // Record audio samples to the file
+    // Record audio samples to the filed
     while (millis() < loopEndTimeMiliss)
     {
+      // Serial.println("Reading audio data");
       i2s_read(I2S_PORT_NUM, (void *)audio_buff, I2S_READ_LEN, &bytes_read, portMAX_DELAY);
       i2s_adc_data_scale((uint8_t *)audio_buff, (uint8_t *)audio_buff, I2S_READ_LEN);
 
-      if (WRITE_SOUND_FILE && millis() < recordingEndTimeMilis)
+      if (WRITE_SOUND_FILE)
       {
-        if (!soundFile.isWritable())
-        {
-          Serial.println("Sound file is not writable??");
-        }
+        file_t soundFile = getSoundFile(soundFileName, true);
+
+        // Write the samples to the file
         soundFile.write((const byte *)audio_buff, bytes_read);
+
+        // Serial.println("Closing sound file");
+        soundFile.close();
       }
 
       if (WRITE_DECIBEL_FILE && (millis() - recordingProgress) > DECIBEL_UPDATE_INTERVAL_US)
@@ -359,7 +390,7 @@ void recordingLoop()
         unsigned long epoch = timeClient.getEpochTime();
         sprintf(csvLine, "%04d-%02d-%02d %02d:%02d:%02d,%f\n", year(epoch), month(epoch), day(epoch), hour(epoch), minute(epoch), second(epoch), dbA);
 
-        dbAData += csvLine;
+        dbA_data += csvLine;
 
         Serial.print("DbA: ");
         Serial.print(csvLine);
@@ -381,12 +412,6 @@ void recordingLoop()
       }
     }
 
-    if (WRITE_SOUND_FILE && soundFile.isOpen())
-    {
-      Serial.println("Closing sound file");
-      soundFile.close();
-    }
-
     if (WRITE_DECIBEL_FILE)
     {
       // get filename
@@ -397,7 +422,7 @@ void recordingLoop()
       Serial.println(dbAfilename);
       file_t decibelFile = getDBFile(dbAfilename, true);
 
-      decibelFile.write((const byte *)dbAData.c_str(), dbAData.length());
+      decibelFile.write((const byte *)dbA_data.c_str(), dbA_data.length());
 
       Serial.println("Closing dbA file");
       decibelFile.close();
@@ -405,7 +430,6 @@ void recordingLoop()
 
     // freeing heap
     free(audio_buff);
-    audio_buff = NULL;
 
     Serial.println("");
     Serial.println("");
@@ -446,7 +470,7 @@ file_t getSoundFile(const String &soundFileName, bool addHeader)
     {
       if (addHeader)
       {
-        Serial.println("If new file, add header");
+        // Serial.println("If new file, add header");
 
         // if file size is 0, add header
         if (soundFile.size() == 0)
