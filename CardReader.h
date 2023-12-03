@@ -42,6 +42,7 @@ class CardHandler
 public:
   CardHandler();
   void init();
+  void deinit();
   file_t getFile(const char *filename, oflag_t oflag = O_APPEND | O_WRITE | O_CREAT);
   void removeFile(const char *filename);
   void closeFile(file_t file);

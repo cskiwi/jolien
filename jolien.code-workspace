@@ -85,7 +85,9 @@
 			"xstddef": "cpp",
 			"xtr1common": "cpp",
 			"memory_resource": "cpp",
-			"string_view": "cpp"
+			"string_view": "cpp",
+			"deque": "cpp",
+			"unordered_set": "cpp"
 		}
 	}
 }

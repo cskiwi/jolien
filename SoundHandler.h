@@ -7,7 +7,7 @@
 #define I2S_SCK GPIO_NUM_26
 #define I2S_PORT_NUM I2S_NUM_0
 #define I2S_SAMPLE_RATE (44100)
-#define I2S_READ_LEN (16 * 1024)
+#define I2S_READ_LEN = I2S_SAMPLE_RATE * I2S_NUM_CHANNELS * (I2S_SAMPLE_BITS / 8) // readlenght / second
 #define I2S_NUM_CHANNELS (1)
 #define I2S_SAMPLE_BITS (16)
 

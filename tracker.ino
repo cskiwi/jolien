@@ -28,7 +28,7 @@
 #define DECIBEL_UPDATE_INTERVAL_US (1 * 1000)
 #endif
 
-#define WRITE_SOUND_FILE true
+#define WRITE_SOUND_FILE false
 #define WRITE_DECIBEL_FILE true
 #define GAIN_FACTOR 3.0
 
@@ -47,7 +47,7 @@ const char *server = "https://gull.purr.dev"; // Server URL
 const char *server = "http://192.168.1.253:3001"; // Server URL
 #endif
 
-const char *apiKey = "<>";       // Your API key
+const char *apiKey = "1234567890";      // Your API key
 const char *trackerName = "tracker-00"; // Your tracker name
 
 // Setup handlers
@@ -69,6 +69,7 @@ int state = STATE_SETUP;
 bool initalStartup = true;
 int retryCounter = 0;
 int blinkAmount = 0;
+unsigned long start;
 
 void blinkLed(int times, uint8_t pin = LED_1)
 {
@@ -94,6 +95,9 @@ void setup()
 
   try
   {
+    // Save the start time
+    start = millis();
+
     // disable bluetooth
     esp_bt_controller_disable();
 
@@ -329,6 +333,14 @@ void recordingLoop()
 
   while (true)
   {
+    // power down the divice after running for 20 minutes
+    if (millis() - start > 20 * 60 * 1000)
+    {
+      Serial.println("Powering down");
+      cardHandler.deinit();
+      esp_deep_sleep_start();
+    }
+
     uint32_t recordingStartTimeMilis = millis();
     uint32_t recordingEndTimeMilis = recordingStartTimeMilis + (RECORD_TIME_US / 1000);
     uint32_t loopEndTimeMiliss = recordingStartTimeMilis + ((NO_RECORD_TIME_US + RECORD_TIME_US) / 1000);

@@ -56,6 +56,11 @@ void CardHandler::init()
   }
 }
 
+void CardHandler::deinit()
+{
+  _sd.end();
+}
+
 file_t CardHandler::getFile(const char *filename, oflag_t oflag)
 {
   // Serial.print("Opening file: ");
